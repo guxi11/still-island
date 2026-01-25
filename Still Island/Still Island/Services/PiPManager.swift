@@ -234,29 +234,42 @@ final class PiPManager: NSObject, ObservableObject {
     func stopPiP() {
         print("[PiPManager] stopPiP called")
         
+        // Cancel KVO observation first
         pipPossibleObservation?.invalidate()
         pipPossibleObservation = nil
         
         updateTimer?.invalidate()
         updateTimer = nil
         
+        // Stop PiP controller
         pipController?.stopPictureInPicture()
         
+        // Stop video converter
         videoStreamConverter?.stopCapture()
         videoStreamConverter = nil
         
+        // Remove content view from video call VC before releasing
+        if let provider = currentProvider {
+            provider.contentView.removeFromSuperview()
+        }
+        
+        // Stop and release provider
         currentProvider?.stop()
         currentProvider = nil
         
+        // Release PiP controller and video call VC
         pipController = nil
         pipVideoCallVC = nil
         hostView = nil
         
+        // Reset state
         isPiPActive = false
         isPiPPossible = false
         isPlaying = true
         isPreparingPiP = false
         errorMessage = nil
+        
+        print("[PiPManager] stopPiP completed")
     }
     
     /// Toggles pause/play state for the PiP content.

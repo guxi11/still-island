@@ -17,6 +17,9 @@ struct ContentView: View {
     // Keep a strong reference to the time provider
     @State private var timeProvider: TimeDisplayProvider?
     
+    // Unique ID to force view recreation
+    @State private var pipViewId = UUID()
+    
     var body: some View {
         NavigationSplitView {
             List {
@@ -56,6 +59,7 @@ struct ContentView: View {
                                 pipManager.bindToViewLayer(view)
                             }
                         )
+                        .id(pipViewId) // Force recreation when ID changes
                         .frame(height: 100)
                         .clipShape(RoundedRectangle(cornerRadius: 8))
                         .onAppear {
@@ -118,6 +122,8 @@ struct ContentView: View {
             pipManager.stopPiP()
             timeProvider = nil
         } else {
+            // Generate new ID to force view recreation
+            pipViewId = UUID()
             let provider = TimeDisplayProvider()
             timeProvider = provider
             pipManager.preparePiP(provider: provider)
