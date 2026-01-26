@@ -21,6 +21,12 @@ final class ViewToVideoStreamConverter {
     /// Whether the converter is currently capturing frames.
     private(set) var isCapturing = false
     
+    /// Callback when screen appears to be off (no display link callbacks)
+    var onScreenOff: (() -> Void)?
+    
+    /// Callback when screen appears to be back on (display link resumes after gap)
+    var onScreenOn: (() -> Void)?
+    
     // MARK: - Private Properties
     
     private var contentView: UIView?
@@ -41,6 +47,12 @@ final class ViewToVideoStreamConverter {
     
     // Store timebase reference
     private var controlTimebase: CMTimebase?
+    
+    // Screen state detection
+    private var lastDisplayLinkTimestamp: CFTimeInterval = 0
+    private var isScreenOff = false
+    /// Threshold in seconds to consider screen as off (no display link for this long)
+    private let screenOffThreshold: CFTimeInterval = 0.5
     
     // MARK: - Initialization
     
@@ -119,6 +131,8 @@ final class ViewToVideoStreamConverter {
         frameInterval = 1.0 / Double(targetFrameRate)
         lastFrameTime = 0
         frameCount = 0
+        lastDisplayLinkTimestamp = 0
+        isScreenOff = false
         
         // Flush the layer before starting to ensure clean state
         displayLayer.flush()
@@ -134,23 +148,91 @@ final class ViewToVideoStreamConverter {
         displayLink = CADisplayLink(target: self, selector: #selector(displayLinkFired))
         displayLink?.add(to: .main, forMode: .common)
         
+        // Start screen off detection timer
+        startScreenOffDetection()
+        
         isCapturing = true
         print("[Converter] Started capture at \(targetFrameRate) FPS")
+    }
+    
+    /// Updates the frame rate dynamically without stopping capture.
+    /// - Parameter frameRate: Target frames per second (1-60).
+    func setFrameRate(_ frameRate: Int) {
+        targetFrameRate = max(1, min(60, frameRate))
+        frameInterval = 1.0 / Double(targetFrameRate)
+        print("[Converter] Frame rate updated to \(targetFrameRate) FPS")
+    }
+    
+    /// Current target frame rate
+    var currentFrameRate: Int {
+        targetFrameRate
     }
     
     /// Stops capturing frames and releases resources.
     func stopCapture() {
         displayLink?.invalidate()
         displayLink = nil
+        stopScreenOffDetection()
         displayLayer.stopRequestingMediaData()
         isCapturing = false
+    }
+    
+    // MARK: - Screen State Detection
+    
+    private var screenOffTimer: Timer?
+    
+    private func startScreenOffDetection() {
+        stopScreenOffDetection()
+        
+        // Check periodically if display link has stopped firing
+        screenOffTimer = Timer.scheduledTimer(withTimeInterval: 0.3, repeats: true) { [weak self] _ in
+            self?.checkScreenState()
+        }
+        // Run in common mode to work in background
+        if let timer = screenOffTimer {
+            RunLoop.main.add(timer, forMode: .common)
+        }
+    }
+    
+    private func stopScreenOffDetection() {
+        screenOffTimer?.invalidate()
+        screenOffTimer = nil
+    }
+    
+    private func checkScreenState() {
+        guard lastDisplayLinkTimestamp > 0 else { return }
+        
+        // Get current time using CACurrentMediaTime (same time base as CADisplayLink)
+        let currentTime = CACurrentMediaTime()
+        let timeSinceLastFrame = currentTime - lastDisplayLinkTimestamp
+        
+        // If no display link callback for longer than threshold, screen is likely off
+        if timeSinceLastFrame > screenOffThreshold && !isScreenOff {
+            isScreenOff = true
+            print("[Converter] Screen OFF detected (no callback for \(String(format: "%.2f", timeSinceLastFrame))s)")
+            onScreenOff?()
+        }
     }
     
     // MARK: - Private Methods
     
     @objc private func displayLinkFired(_ link: CADisplayLink) {
-        // Frame rate limiting
         let currentTime = link.timestamp
+        
+        // Screen state detection: check gap since last callback
+        if lastDisplayLinkTimestamp > 0 {
+            let gap = currentTime - lastDisplayLinkTimestamp
+            
+            // If there was a large gap, screen was likely off and just came back on
+            if gap > screenOffThreshold && isScreenOff {
+                isScreenOff = false
+                print("[Converter] Screen ON detected (gap: \(String(format: "%.2f", gap))s)")
+                onScreenOn?()
+            }
+        }
+        lastDisplayLinkTimestamp = currentTime
+        
+        // Frame rate limiting
         guard currentTime - lastFrameTime >= frameInterval else { return }
         lastFrameTime = currentTime
         

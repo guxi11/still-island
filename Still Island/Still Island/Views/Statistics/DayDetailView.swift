@@ -20,11 +20,31 @@ struct DayDetailView: View {
                 Text(formattedDate)
                     .font(.headline)
                 
-                Text(formattedTotalDuration)
-                    .font(.title)
-                    .fontWeight(.bold)
-                    .fontDesign(.monospaced)
-                    .foregroundStyle(.blue)
+                HStack(spacing: 20) {
+                    VStack(spacing: 2) {
+                        Text(formattedTotalDuration)
+                            .font(.title2)
+                            .fontWeight(.bold)
+                            .fontDesign(.monospaced)
+                            .foregroundStyle(.blue)
+                        Text("总时长")
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                    }
+                    
+                    if totalAwayDuration > 0 {
+                        VStack(spacing: 2) {
+                            Text(formattedAwayDuration)
+                                .font(.title2)
+                                .fontWeight(.bold)
+                                .fontDesign(.monospaced)
+                                .foregroundStyle(.purple)
+                            Text("离开时间")
+                                .font(.caption2)
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                }
             }
             .padding()
             .frame(maxWidth: .infinity)
@@ -53,8 +73,13 @@ struct DayDetailView: View {
                         TimelineView(sessions: sessions)
                             .padding()
                         
+                        // Legend
+                        TimelineLegendView()
+                            .padding(.horizontal)
+                        
                         Divider()
                             .padding(.horizontal)
+                            .padding(.top, 8)
                         
                         // Session list
                         VStack(alignment: .leading, spacing: 12) {
@@ -94,6 +119,10 @@ struct DayDetailView: View {
         sessions.reduce(0) { $0 + $1.duration }
     }
     
+    private var totalAwayDuration: TimeInterval {
+        sessions.reduce(0) { $0 + $1.totalAwayDuration }
+    }
+    
     private var formattedDate: String {
         let formatter = DateFormatter()
         formatter.dateFormat = "yyyy年M月d日 EEEE"
@@ -111,6 +140,46 @@ struct DayDetailView: View {
             return String(format: "%d:%02d:%02d", hours, minutes, seconds)
         } else {
             return String(format: "%02d:%02d", minutes, seconds)
+        }
+    }
+    
+    private var formattedAwayDuration: String {
+        let totalSeconds = Int(totalAwayDuration)
+        let hours = totalSeconds / 3600
+        let minutes = (totalSeconds % 3600) / 60
+        let seconds = totalSeconds % 60
+        
+        if hours > 0 {
+            return String(format: "%d:%02d:%02d", hours, minutes, seconds)
+        } else {
+            return String(format: "%02d:%02d", minutes, seconds)
+        }
+    }
+}
+
+/// Legend for the timeline view
+struct TimelineLegendView: View {
+    var body: some View {
+        HStack(spacing: 16) {
+            LegendItem(color: .blue.opacity(0.7), label: "屏幕亮起")
+            LegendItem(color: .purple.opacity(0.6), label: "屏幕熄灭")
+        }
+        .font(.caption)
+    }
+}
+
+/// Single legend item
+struct LegendItem: View {
+    let color: Color
+    let label: String
+    
+    var body: some View {
+        HStack(spacing: 4) {
+            RoundedRectangle(cornerRadius: 2)
+                .fill(color)
+                .frame(width: 12, height: 12)
+            Text(label)
+                .foregroundStyle(.secondary)
         }
     }
 }
@@ -140,7 +209,7 @@ struct TimelineView: View {
                     .offset(y: CGFloat(hour) * hourHeight)
                 }
                 
-                // Session blocks
+                // Session blocks with away intervals
                 ForEach(sessions, id: \.id) { session in
                     sessionBlock(for: session, width: geometry.size.width - 60)
                         .offset(x: 50)
@@ -150,6 +219,7 @@ struct TimelineView: View {
         .frame(height: 24 * hourHeight + 20)
     }
     
+    @ViewBuilder
     private func sessionBlock(for session: DisplaySession, width: CGFloat) -> some View {
         let startHour = calendar.component(.hour, from: session.startTime)
         let startMinute = calendar.component(.minute, from: session.startTime)
@@ -158,10 +228,47 @@ struct TimelineView: View {
         let durationMinutes = session.duration / 60.0
         let blockHeight = max(CGFloat(durationMinutes) / 60.0 * hourHeight, 4) // Min height of 4
         
-        return RoundedRectangle(cornerRadius: 4)
-            .fill(providerColor(session.providerType).opacity(0.7))
-            .frame(width: width * 0.8, height: blockHeight)
-            .offset(y: startOffset)
+        let blockWidth = width * 0.8
+        let awayIntervals = session.awayIntervals
+        
+        ZStack(alignment: .topLeading) {
+            // Base block (active time - screen on)
+            RoundedRectangle(cornerRadius: 4)
+                .fill(providerColor(session.providerType).opacity(0.7))
+                .frame(width: blockWidth, height: blockHeight)
+            
+            // Overlay away intervals (screen off)
+            ForEach(awayIntervals) { interval in
+                if let intervalOffset = calculateIntervalOffset(session: session, interval: interval),
+                   let intervalHeight = calculateIntervalHeight(interval: interval, sessionDuration: session.duration, blockHeight: blockHeight) {
+                    RoundedRectangle(cornerRadius: 2)
+                        .fill(Color.purple.opacity(0.6))
+                        .frame(width: blockWidth, height: intervalHeight)
+                        .offset(y: intervalOffset)
+                }
+            }
+        }
+        .offset(y: startOffset)
+    }
+    
+    private func calculateIntervalOffset(session: DisplaySession, interval: AwayInterval) -> CGFloat? {
+        let sessionDuration = session.duration
+        guard sessionDuration > 0 else { return nil }
+        
+        let intervalStartOffset = interval.startTime.timeIntervalSince(session.startTime)
+        let relativeOffset = intervalStartOffset / sessionDuration
+        
+        let durationMinutes = sessionDuration / 60.0
+        let blockHeight = max(CGFloat(durationMinutes) / 60.0 * hourHeight, 4)
+        
+        return CGFloat(relativeOffset) * blockHeight
+    }
+    
+    private func calculateIntervalHeight(interval: AwayInterval, sessionDuration: TimeInterval, blockHeight: CGFloat) -> CGFloat? {
+        guard sessionDuration > 0 else { return nil }
+        
+        let relativeHeight = interval.duration / sessionDuration
+        return max(CGFloat(relativeHeight) * blockHeight, 2) // Min height of 2
     }
     
     private func providerColor(_ type: String) -> Color {
@@ -200,12 +307,20 @@ struct SessionRowView: View {
             
             Spacer()
             
-            // Duration
-            Text(session.formattedDuration)
-                .font(.callout)
-                .fontWeight(.medium)
-                .fontDesign(.monospaced)
-                .foregroundStyle(providerColor)
+            // Duration info
+            VStack(alignment: .trailing, spacing: 2) {
+                Text(session.formattedDuration)
+                    .font(.callout)
+                    .fontWeight(.medium)
+                    .fontDesign(.monospaced)
+                    .foregroundStyle(providerColor)
+                
+                if session.totalAwayDuration > 0 {
+                    Text("离开 \(session.formattedAwayDuration)")
+                        .font(.caption2)
+                        .foregroundStyle(.purple)
+                }
+            }
         }
         .padding()
         .background(

@@ -7,6 +7,7 @@
 
 import Foundation
 import SwiftData
+import UIKit
 
 /// Singleton service for tracking PiP display session durations.
 /// Automatically records start/end times and persists to SwiftData.
@@ -22,10 +23,17 @@ final class DisplayTimeTracker: ObservableObject {
     @Published private(set) var currentSession: DisplaySession?
     @Published private(set) var isTracking = false
     
+    /// Current away interval (when user's screen is off)
+    @Published private(set) var currentAwayInterval: AwayInterval?
+    
+    /// Last completed away interval (used to trigger celebration)
+    @Published private(set) var lastCompletedAwayInterval: AwayInterval?
+    
     // MARK: - Private Properties
     
     private var modelContainer: ModelContainer?
     private var modelContext: ModelContext?
+    private var notificationObservers: [NSObjectProtocol] = []
     
     // MARK: - Initialization
     
@@ -41,6 +49,56 @@ final class DisplayTimeTracker: ObservableObject {
         
         // Check for any unclosed sessions from previous runs
         cleanupUnfinishedSessions()
+    }
+    
+    /// Setup observers for screen state changes (lock/unlock)
+    /// Now deprecated - use handleScreenOff/handleScreenOn instead which are called by ViewToVideoStreamConverter
+    func setupScreenStateObservers() {
+        print("[DisplayTimeTracker] Screen state observers (deprecated) - using PiP-based detection now")
+    }
+    
+    private func removeScreenStateObservers() {
+        for observer in notificationObservers {
+            NotificationCenter.default.removeObserver(observer)
+        }
+        notificationObservers.removeAll()
+    }
+    
+    // MARK: - Screen State Handlers (called by ViewToVideoStreamConverter)
+    
+    /// Called when screen is detected as off (CADisplayLink stopped firing)
+    func handleScreenOff() {
+        // Only track away time if PiP is currently active
+        guard isTracking, currentAwayInterval == nil else { return }
+        
+        currentAwayInterval = AwayInterval(startTime: Date())
+        print("[DisplayTimeTracker] Screen OFF - started away tracking")
+    }
+    
+    /// Called when screen is detected as back on (CADisplayLink resumed after gap)
+    func handleScreenOn() {
+        // Complete the away interval when screen turns back on
+        guard var interval = currentAwayInterval else { return }
+        
+        interval.endTime = Date()
+        
+        // Save to current session
+        if let session = currentSession {
+            session.addAwayInterval(interval)
+            saveContext()
+            print("[DisplayTimeTracker] Screen ON - away duration: \(interval.formattedDuration)")
+        }
+        
+        // Trigger celebration
+        lastCompletedAwayInterval = interval
+        print("[DisplayTimeTracker] Triggering celebration for \(interval.durationDescription)")
+        
+        currentAwayInterval = nil
+    }
+    
+    /// Clear the last away interval (call after celebration is shown)
+    func clearLastAwayInterval() {
+        lastCompletedAwayInterval = nil
     }
     
     // MARK: - Public Methods
@@ -79,11 +137,18 @@ final class DisplayTimeTracker: ObservableObject {
             return
         }
         
+        // Complete any ongoing away interval
+        if var interval = currentAwayInterval {
+            interval.endTime = Date()
+            session.addAwayInterval(interval)
+            currentAwayInterval = nil
+        }
+        
         session.endSession()
         
         do {
             try context.save()
-            print("[DisplayTimeTracker] Stopped tracking session. Duration: \(session.formattedDuration)")
+            print("[DisplayTimeTracker] Stopped tracking session. Duration: \(session.formattedDuration), Away: \(session.formattedAwayDuration)")
         } catch {
             print("[DisplayTimeTracker] ERROR: Failed to save session end: \(error)")
         }
@@ -134,16 +199,28 @@ final class DisplayTimeTracker: ObservableObject {
         return sessions.reduce(0) { $0 + $1.duration }
     }
     
+    /// Get total away duration for a specific date
+    func totalAwayDuration(for date: Date) -> TimeInterval {
+        let sessions = sessions(for: date)
+        return sessions.reduce(0) { $0 + $1.totalAwayDuration }
+    }
+    
     /// Get total duration for a date range
     func totalDuration(from startDate: Date, to endDate: Date) -> TimeInterval {
         let sessions = sessions(from: startDate, to: endDate)
         return sessions.reduce(0) { $0 + $1.duration }
     }
     
+    /// Get total away duration for a date range
+    func totalAwayDuration(from startDate: Date, to endDate: Date) -> TimeInterval {
+        let sessions = sessions(from: startDate, to: endDate)
+        return sessions.reduce(0) { $0 + $1.totalAwayDuration }
+    }
+    
     /// Get daily totals for a date range (for charts)
-    func dailyTotals(from startDate: Date, to endDate: Date) -> [(date: Date, duration: TimeInterval, byProvider: [String: TimeInterval])] {
+    func dailyTotals(from startDate: Date, to endDate: Date) -> [(date: Date, duration: TimeInterval, awayDuration: TimeInterval, byProvider: [String: TimeInterval])] {
         let calendar = Calendar.current
-        var results: [(date: Date, duration: TimeInterval, byProvider: [String: TimeInterval])] = []
+        var results: [(date: Date, duration: TimeInterval, awayDuration: TimeInterval, byProvider: [String: TimeInterval])] = []
         
         var currentDate = calendar.startOfDay(for: startDate)
         let endDay = calendar.startOfDay(for: endDate)
@@ -151,6 +228,7 @@ final class DisplayTimeTracker: ObservableObject {
         while currentDate <= endDay {
             let daySessions = sessions(for: currentDate)
             let totalDuration = daySessions.reduce(0) { $0 + $1.duration }
+            let totalAwayDuration = daySessions.reduce(0) { $0 + $1.totalAwayDuration }
             
             // Group by provider type
             var byProvider: [String: TimeInterval] = [:]
@@ -158,7 +236,7 @@ final class DisplayTimeTracker: ObservableObject {
                 byProvider[session.providerType, default: 0] += session.duration
             }
             
-            results.append((date: currentDate, duration: totalDuration, byProvider: byProvider))
+            results.append((date: currentDate, duration: totalDuration, awayDuration: totalAwayDuration, byProvider: byProvider))
             currentDate = calendar.date(byAdding: .day, value: 1, to: currentDate)!
         }
         
@@ -166,6 +244,15 @@ final class DisplayTimeTracker: ObservableObject {
     }
     
     // MARK: - Private Methods
+    
+    private func saveContext() {
+        guard let context = modelContext else { return }
+        do {
+            try context.save()
+        } catch {
+            print("[DisplayTimeTracker] ERROR: Failed to save context: \(error)")
+        }
+    }
     
     /// Clean up any sessions that weren't properly closed
     private func cleanupUnfinishedSessions() {
@@ -183,6 +270,7 @@ final class DisplayTimeTracker: ObservableObject {
                 // Use start time + 1 minute as a fallback end time
                 // or last known app state time if available
                 session.endTime = session.startTime.addingTimeInterval(60)
+                session.duration = 60
                 print("[DisplayTimeTracker] Cleaned up unfinished session: \(session.id)")
             }
             

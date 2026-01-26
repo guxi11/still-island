@@ -93,6 +93,18 @@ final class PiPManager: NSObject, ObservableObject {
         let converter = ViewToVideoStreamConverter()
         videoStreamConverter = converter
         
+        // Setup screen state detection callbacks
+        converter.onScreenOff = {
+            Task { @MainActor in
+                DisplayTimeTracker.shared.handleScreenOff()
+            }
+        }
+        converter.onScreenOn = {
+            Task { @MainActor in
+                DisplayTimeTracker.shared.handleScreenOn()
+            }
+        }
+        
         // Ensure the content view has valid size
         let contentView = provider.contentView
         if contentView.bounds.size.width == 0 || contentView.bounds.size.height == 0 {
@@ -286,6 +298,18 @@ final class PiPManager: NSObject, ObservableObject {
             videoStreamConverter?.stopCapture()
             currentProvider?.stop()
         }
+    }
+    
+    /// Updates the frame rate for the video stream converter.
+    /// Use higher frame rates (30) for animations, lower (10) for static content.
+    /// - Parameter frameRate: Target frames per second (1-60).
+    func setFrameRate(_ frameRate: Int) {
+        videoStreamConverter?.setFrameRate(frameRate)
+    }
+    
+    /// Returns the current frame rate of the video stream converter.
+    var currentFrameRate: Int {
+        videoStreamConverter?.currentFrameRate ?? 10
     }
     
     // MARK: - Private Methods

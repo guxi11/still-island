@@ -25,6 +25,8 @@ struct Still_IslandApp: App {
             // Configure DisplayTimeTracker with the model container
             Task { @MainActor in
                 DisplayTimeTracker.shared.configure(with: container)
+                // Setup screen state observers for away time tracking
+                DisplayTimeTracker.shared.setupScreenStateObservers()
             }
         } catch {
             fatalError("Could not create ModelContainer: \(error)")

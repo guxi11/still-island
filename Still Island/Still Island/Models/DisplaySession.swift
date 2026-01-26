@@ -26,6 +26,44 @@ final class DisplaySession {
     /// Duration in seconds (calculated and stored when session ends)
     var duration: TimeInterval = 0
     
+    /// JSON encoded away intervals data (for SwiftData persistence)
+    var awayIntervalsData: Data?
+    
+    /// Away intervals when user's screen was off during this session
+    var awayIntervals: [AwayInterval] {
+        get {
+            guard let data = awayIntervalsData else { return [] }
+            return (try? JSONDecoder().decode([AwayInterval].self, from: data)) ?? []
+        }
+        set {
+            awayIntervalsData = try? JSONEncoder().encode(newValue)
+        }
+    }
+    
+    /// Total duration of all away intervals in seconds
+    var totalAwayDuration: TimeInterval {
+        awayIntervals.reduce(0) { $0 + $1.duration }
+    }
+    
+    /// Active usage duration (total duration minus away time)
+    var activeUsageDuration: TimeInterval {
+        max(0, duration - totalAwayDuration)
+    }
+    
+    /// Formatted away duration string
+    var formattedAwayDuration: String {
+        let totalSeconds = Int(totalAwayDuration)
+        let hours = totalSeconds / 3600
+        let minutes = (totalSeconds % 3600) / 60
+        let seconds = totalSeconds % 60
+        
+        if hours > 0 {
+            return String(format: "%d:%02d:%02d", hours, minutes, seconds)
+        } else {
+            return String(format: "%02d:%02d", minutes, seconds)
+        }
+    }
+    
     /// Formatted duration string (HH:MM:SS or MM:SS)
     var formattedDuration: String {
         let totalSeconds = Int(duration)
@@ -46,6 +84,7 @@ final class DisplaySession {
         self.startTime = Date()
         self.endTime = nil
         self.duration = 0
+        self.awayIntervalsData = nil
     }
     
     /// Marks the session as ended and calculates final duration
@@ -55,6 +94,13 @@ final class DisplaySession {
             endTime = now
             duration = now.timeIntervalSince(startTime)
         }
+    }
+    
+    /// Adds a completed away interval to this session
+    func addAwayInterval(_ interval: AwayInterval) {
+        var intervals = awayIntervals
+        intervals.append(interval)
+        awayIntervals = intervals
     }
 }
 

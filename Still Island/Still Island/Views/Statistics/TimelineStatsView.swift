@@ -13,7 +13,7 @@ struct DailyUsageData: Identifiable {
     let id = UUID()
     let date: Date
     let duration: TimeInterval
-    let providerType: String
+    let category: String  // "展示时间" or "离开时间"
     
     var durationMinutes: Double {
         duration / 60.0
@@ -76,7 +76,7 @@ struct TimelineStatsView: View {
                         x: .value("日期", data.date, unit: .day),
                         y: .value("时长(分钟)", data.durationMinutes)
                     )
-                    .foregroundStyle(by: .value("类型", providerDisplayName(data.providerType)))
+                    .foregroundStyle(by: .value("类型", data.category))
                 }
                 .chartXAxis {
                     AxisMarks(values: .stride(by: .day, count: timeRange == .week ? 1 : 5)) { value in
@@ -95,8 +95,8 @@ struct TimelineStatsView: View {
                     }
                 }
                 .chartForegroundStyleScale([
-                    "时钟": Color.blue,
-                    "计时器": Color.green
+                    "展示时间": Color.blue,
+                    "离开时间": Color.purple
                 ])
                 .chartLegend(position: .bottom)
                 .frame(height: 250)
@@ -104,19 +104,30 @@ struct TimelineStatsView: View {
                 
                 // Summary below chart
                 HStack(spacing: 20) {
-                    ForEach(providerSummaries, id: \.type) { summary in
-                        VStack(spacing: 4) {
-                            HStack(spacing: 4) {
-                                Circle()
-                                    .fill(summary.color)
-                                    .frame(width: 8, height: 8)
-                                Text(summary.displayName)
-                                    .font(.caption)
-                            }
-                            Text(formatDuration(summary.totalDuration))
-                                .font(.callout)
-                                .fontWeight(.medium)
+                    VStack(spacing: 4) {
+                        HStack(spacing: 4) {
+                            Circle()
+                                .fill(Color.blue)
+                                .frame(width: 8, height: 8)
+                            Text("展示时间")
+                                .font(.caption)
                         }
+                        Text(formatDuration(totalDisplayDuration))
+                            .font(.callout)
+                            .fontWeight(.medium)
+                    }
+                    
+                    VStack(spacing: 4) {
+                        HStack(spacing: 4) {
+                            Circle()
+                                .fill(Color.purple)
+                                .frame(width: 8, height: 8)
+                            Text("离开时间")
+                                .font(.caption)
+                        }
+                        Text(formatDuration(totalAwayDuration))
+                            .font(.callout)
+                            .fontWeight(.medium)
                     }
                 }
                 .padding()
@@ -143,58 +154,42 @@ struct TimelineStatsView: View {
         var data: [DailyUsageData] = []
         
         for daily in dailyTotals {
-            for (providerType, duration) in daily.byProvider {
-                if duration > 0 {
-                    data.append(DailyUsageData(
-                        date: daily.date,
-                        duration: duration,
-                        providerType: providerType
-                    ))
-                }
+            // Add display duration (total - away = active display time)
+            let displayDuration = daily.duration - daily.awayDuration
+            if displayDuration > 0 {
+                data.append(DailyUsageData(
+                    date: daily.date,
+                    duration: displayDuration,
+                    category: "展示时间"
+                ))
+            }
+            
+            // Add away duration
+            if daily.awayDuration > 0 {
+                data.append(DailyUsageData(
+                    date: daily.date,
+                    duration: daily.awayDuration,
+                    category: "离开时间"
+                ))
             }
         }
         
         return data
     }
     
-    private var providerSummaries: [(type: String, displayName: String, totalDuration: TimeInterval, color: Color)] {
+    private var totalDisplayDuration: TimeInterval {
         let (start, end) = dateRange
         let dailyTotals = tracker.dailyTotals(from: start, to: end)
-        
-        var totals: [String: TimeInterval] = [:]
-        for daily in dailyTotals {
-            for (providerType, duration) in daily.byProvider {
-                totals[providerType, default: 0] += duration
-            }
-        }
-        
-        return totals.map { (type, duration) in
-            (
-                type: type,
-                displayName: providerDisplayName(type),
-                totalDuration: duration,
-                color: providerColor(type)
-            )
-        }.sorted { $0.totalDuration > $1.totalDuration }
+        return dailyTotals.reduce(0) { $0 + $1.duration - $1.awayDuration }
+    }
+    
+    private var totalAwayDuration: TimeInterval {
+        let (start, end) = dateRange
+        let dailyTotals = tracker.dailyTotals(from: start, to: end)
+        return dailyTotals.reduce(0) { $0 + $1.awayDuration }
     }
     
     // MARK: - Helper Methods
-    
-    private func providerDisplayName(_ type: String) -> String {
-        switch type {
-        case "time": return "时钟"
-        case "timer": return "计时器"
-        default: return type
-        }
-    }
-    
-    private func providerColor(_ type: String) -> Color {
-        switch type {
-        case "time": return .blue
-        case "timer": return .green
-        default: return .gray
-        }
-    }
     
     private func formatDuration(_ duration: TimeInterval) -> String {
         let totalSeconds = Int(duration)

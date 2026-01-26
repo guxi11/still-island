@@ -8,6 +8,7 @@
 import Foundation
 
 /// Enum representing available PiP provider types
+@MainActor
 enum PiPProviderType: String, CaseIterable, Identifiable {
     case time = "time"
     case timer = "timer"

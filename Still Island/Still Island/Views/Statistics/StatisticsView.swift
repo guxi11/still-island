@@ -49,20 +49,40 @@ struct SummaryHeaderView: View {
     @ObservedObject var tracker: DisplayTimeTracker
     
     var body: some View {
-        HStack(spacing: 20) {
-            StatCard(
-                title: "今日",
-                duration: todayDuration,
-                icon: "sun.max.fill",
-                color: .orange
-            )
+        VStack(spacing: 12) {
+            // Today's stats
+            HStack(spacing: 16) {
+                StatCard(
+                    title: "今日展示",
+                    duration: todayDuration,
+                    icon: "sun.max.fill",
+                    color: .orange
+                )
+                
+                StatCard(
+                    title: "今日离开",
+                    duration: todayAwayDuration,
+                    icon: "moon.zzz.fill",
+                    color: .purple
+                )
+            }
             
-            StatCard(
-                title: "本周",
-                duration: weekDuration,
-                icon: "calendar",
-                color: .blue
-            )
+            // Week stats
+            HStack(spacing: 16) {
+                StatCard(
+                    title: "本周展示",
+                    duration: weekDuration,
+                    icon: "calendar",
+                    color: .blue
+                )
+                
+                StatCard(
+                    title: "本周离开",
+                    duration: weekAwayDuration,
+                    icon: "moon.stars.fill",
+                    color: .indigo
+                )
+            }
         }
     }
     
@@ -70,11 +90,22 @@ struct SummaryHeaderView: View {
         tracker.totalDuration(for: Date())
     }
     
+    private var todayAwayDuration: TimeInterval {
+        tracker.totalAwayDuration(for: Date())
+    }
+    
     private var weekDuration: TimeInterval {
         let calendar = Calendar.current
         let startOfWeek = calendar.date(from: calendar.dateComponents([.yearForWeekOfYear, .weekOfYear], from: Date()))!
         let endOfWeek = calendar.date(byAdding: .day, value: 7, to: startOfWeek)!
         return tracker.totalDuration(from: startOfWeek, to: endOfWeek)
+    }
+    
+    private var weekAwayDuration: TimeInterval {
+        let calendar = Calendar.current
+        let startOfWeek = calendar.date(from: calendar.dateComponents([.yearForWeekOfYear, .weekOfYear], from: Date()))!
+        let endOfWeek = calendar.date(byAdding: .day, value: 7, to: startOfWeek)!
+        return tracker.totalAwayDuration(from: startOfWeek, to: endOfWeek)
     }
 }
 
