@@ -18,52 +18,56 @@ struct PiPSectionView: View {
     @State private var pipViewId = UUID()
     
     private let columns = [
-        GridItem(.flexible(), spacing: 12),
-        GridItem(.flexible(), spacing: 12)
+        GridItem(.flexible(), spacing: 16),
+        GridItem(.flexible(), spacing: 16)
     ]
     
     var body: some View {
-        Section {
-            // Dual-column grid of providers
-            LazyVGrid(columns: columns, spacing: 12) {
-                ForEach(registry.availableProviders) { providerType in
-                    PiPItemView(
-                        providerType: providerType,
-                        isActive: isProviderActive(providerType),
-                        isPreparing: isProviderPreparing(providerType),
-                        onTap: {
-                            handleProviderTap(providerType)
-                        }
-                    )
-                }
-            }
-            .padding(.vertical, 4)
-            
-            // PiP preview host - required for PiP to work
-            if pipManager.isPreparingPiP || pipManager.isPiPActive {
-                PiPHostView(
-                    displayLayer: pipManager.displayLayer ?? AVSampleBufferDisplayLayer(),
-                    onViewCreated: { view in
-                        print("[PiPSectionView] SampleBufferDisplayView created")
-                        pipManager.bindToViewLayer(view)
+        // Header outside Section
+        Section(header: Text("悬浮窗口")) {
+            EmptyView()
+        }
+        .listRowInsets(EdgeInsets())
+        .listRowBackground(Color.clear)
+        
+        // Dual-column grid of providers - iOS Shortcuts style, no container
+        LazyVGrid(columns: columns, spacing: 16) {
+            ForEach(registry.availableProviders) { providerType in
+                PiPItemView(
+                    providerType: providerType,
+                    isActive: isProviderActive(providerType),
+                    isPreparing: isProviderPreparing(providerType),
+                    onTap: {
+                        handleProviderTap(providerType)
                     }
                 )
-                .id(pipViewId)
-                .frame(height: 1) // Minimal height, just needs to be in view hierarchy
-                .opacity(0.01) // Almost invisible
             }
-            
-            // Error message
-            if let error = pipManager.errorMessage {
-                Text(error)
-                    .font(.caption)
-                    .foregroundStyle(.red)
-            }
-        } header: {
-            Text("悬浮窗口")
-        } footer: {
-            Text("点击启动悬浮窗口，切换到其他应用后可见")
-                .font(.caption2)
+        }
+        .listRowInsets(EdgeInsets(top: 8, leading: 0, bottom: 8, trailing: 0))
+        .listRowBackground(Color.clear)
+        
+        // PiP preview host - required for PiP to work
+        if pipManager.isPreparingPiP || pipManager.isPiPActive {
+            PiPHostView(
+                displayLayer: pipManager.displayLayer ?? AVSampleBufferDisplayLayer(),
+                onViewCreated: { view in
+                    print("[PiPSectionView] SampleBufferDisplayView created")
+                    pipManager.bindToViewLayer(view)
+                }
+            )
+            .id(pipViewId)
+            .frame(height: 1)
+            .opacity(0.01)
+            .listRowInsets(EdgeInsets())
+            .listRowBackground(Color.clear)
+        }
+        
+        // Error message
+        if let error = pipManager.errorMessage {
+            Text(error)
+                .font(.caption)
+                .foregroundStyle(.red)
+                .listRowBackground(Color.clear)
         }
     }
     

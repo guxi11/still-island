@@ -72,20 +72,12 @@ struct PiPStaticPreview: View {
     var body: some View {
         ZStack {
             // Background matching provider style
-            RoundedRectangle(cornerRadius: 8)
-                .fill(backgroundColor)
+            backgroundColor
             
-            // Content preview
-            VStack(spacing: 4) {
-                Image(systemName: providerType.iconName)
-                    .font(.title2)
-                    .foregroundStyle(foregroundColor)
-                
-                Text(previewText)
-                    .font(.system(.caption, design: .monospaced))
-                    .fontWeight(.semibold)
-                    .foregroundStyle(foregroundColor)
-            }
+            // Content preview - larger text for iOS Shortcuts style
+            Text(previewText)
+                .font(.system(size: 32, weight: .semibold, design: .monospaced))
+                .foregroundStyle(foregroundColor)
         }
     }
     
