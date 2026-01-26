@@ -10,18 +10,26 @@ import SwiftData
 
 @main
 struct Still_IslandApp: App {
-    var sharedModelContainer: ModelContainer = {
+    let sharedModelContainer: ModelContainer
+    
+    init() {
         let schema = Schema([
-            Item.self,
+            DisplaySession.self,
         ])
         let modelConfiguration = ModelConfiguration(schema: schema, isStoredInMemoryOnly: false)
 
         do {
-            return try ModelContainer(for: schema, configurations: [modelConfiguration])
+            let container = try ModelContainer(for: schema, configurations: [modelConfiguration])
+            self.sharedModelContainer = container
+            
+            // Configure DisplayTimeTracker with the model container
+            Task { @MainActor in
+                DisplayTimeTracker.shared.configure(with: container)
+            }
         } catch {
             fatalError("Could not create ModelContainer: \(error)")
         }
-    }()
+    }
 
     var body: some Scene {
         WindowGroup {

@@ -25,6 +25,7 @@ final class PiPManager: NSObject, ObservableObject {
     @Published private(set) var isPlaying = true
     @Published private(set) var errorMessage: String?
     @Published private(set) var isPreparingPiP = false
+    @Published private(set) var currentProviderType: String?
     
     // MARK: - Public Properties
     
@@ -86,6 +87,7 @@ final class PiPManager: NSObject, ObservableObject {
         
         // Store provider
         currentProvider = provider
+        currentProviderType = type(of: provider).providerType
         
         // Create converter for preview
         let converter = ViewToVideoStreamConverter()
@@ -268,6 +270,7 @@ final class PiPManager: NSObject, ObservableObject {
         isPlaying = true
         isPreparingPiP = false
         errorMessage = nil
+        currentProviderType = nil
         
         print("[PiPManager] stopPiP completed")
     }
@@ -316,6 +319,12 @@ extension PiPManager: AVPictureInPictureControllerDelegate {
             self.isPiPActive = true
             self.isPreparingPiP = false
             self.errorMessage = nil
+            
+            // Start tracking display time
+            if let providerType = self.currentProviderType {
+                DisplayTimeTracker.shared.startTracking(providerType: providerType)
+            }
+            
             print("[PiPManager] PiP did start successfully!")
         }
     }
@@ -329,6 +338,10 @@ extension PiPManager: AVPictureInPictureControllerDelegate {
     nonisolated func pictureInPictureControllerDidStopPictureInPicture(_ pictureInPictureController: AVPictureInPictureController) {
         Task { @MainActor in
             self.isPiPActive = false
+            
+            // Stop tracking display time
+            DisplayTimeTracker.shared.stopTracking()
+            
             print("[PiPManager] PiP did stop")
         }
     }

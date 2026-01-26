@@ -11,6 +11,12 @@ import UIKit
 /// Shows current time in HH:mm:ss format with high contrast styling.
 final class TimeDisplayProvider: PiPContentProvider {
     
+    // MARK: - PiPContentProvider Static Properties
+    
+    static let providerType: String = "time"
+    static let displayName: String = "时钟"
+    static let iconName: String = "clock.fill"
+    
     // MARK: - PiPContentProvider
     
     let contentView: UIView

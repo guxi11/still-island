@@ -10,6 +10,16 @@ import UIKit
 /// Protocol that defines requirements for content providers that can be displayed in PiP window.
 /// Implement this protocol to create new content types (e.g., clock, pomodoro timer, weather).
 protocol PiPContentProvider: AnyObject {
+    /// Unique identifier for this provider type (e.g., "time", "timer")
+    /// Used for tracking and statistics.
+    static var providerType: String { get }
+    
+    /// Display name shown in the UI
+    static var displayName: String { get }
+    
+    /// SF Symbol name for the provider icon
+    static var iconName: String { get }
+    
     /// The view that contains the content to be displayed in PiP.
     /// This view will be captured and converted to video frames.
     var contentView: UIView { get }
