@@ -3,6 +3,7 @@
 //  Still Island
 //
 //  Section view with dual-column grid layout for PiP providers.
+//  PiP host view is now embedded inside each card to avoid layout reflow.
 //
 
 import SwiftUI
@@ -23,51 +24,35 @@ struct PiPSectionView: View {
     ]
     
     var body: some View {
-        // Header outside Section
-        Section(header: Text("悬浮窗口")) {
-            EmptyView()
-        }
-        .listRowInsets(EdgeInsets())
-        .listRowBackground(Color.clear)
-        
-        // Dual-column grid of providers - iOS Shortcuts style, no container
-        LazyVGrid(columns: columns, spacing: 16) {
-            ForEach(registry.availableProviders) { providerType in
-                PiPItemView(
-                    providerType: providerType,
-                    isActive: isProviderActive(providerType),
-                    isPreparing: isProviderPreparing(providerType),
-                    onTap: {
-                        handleProviderTap(providerType)
-                    }
-                )
-            }
-        }
-        .listRowInsets(EdgeInsets(top: 8, leading: 0, bottom: 8, trailing: 0))
-        .listRowBackground(Color.clear)
-        
-        // PiP preview host - required for PiP to work
-        if pipManager.isPreparingPiP || pipManager.isPiPActive {
-            PiPHostView(
-                displayLayer: pipManager.displayLayer ?? AVSampleBufferDisplayLayer(),
-                onViewCreated: { view in
-                    print("[PiPSectionView] SampleBufferDisplayView created")
-                    pipManager.bindToViewLayer(view)
+        VStack(spacing: 20) {
+            // Dual-column grid of providers - minimal artistic style
+            // PiP host view is embedded inside each card (no external host)
+            LazyVGrid(columns: columns, spacing: 16) {
+                ForEach(registry.availableProviders) { providerType in
+                    PiPItemView(
+                        providerType: providerType,
+                        isActive: isProviderActive(providerType),
+                        isPreparing: isProviderPreparing(providerType),
+                        onTap: {
+                            handleProviderTap(providerType)
+                        },
+                        onPiPViewCreated: isProviderActive(providerType) || isProviderPreparing(providerType) ? { view in
+                            print("[PiPSectionView] SampleBufferDisplayView created inside card")
+                            pipManager.bindToViewLayer(view)
+                        } : nil,
+                        displayLayer: isProviderActive(providerType) || isProviderPreparing(providerType) ? pipManager.displayLayer : nil
+                    )
+                    .id(isProviderActive(providerType) || isProviderPreparing(providerType) ? pipViewId : UUID())
                 }
-            )
-            .id(pipViewId)
-            .frame(height: 1)
-            .opacity(0.01)
-            .listRowInsets(EdgeInsets())
-            .listRowBackground(Color.clear)
-        }
-        
-        // Error message
-        if let error = pipManager.errorMessage {
-            Text(error)
-                .font(.caption)
-                .foregroundStyle(.red)
-                .listRowBackground(Color.clear)
+            }
+            
+            // Error message - subtle style
+            if let error = pipManager.errorMessage {
+                Text(error)
+                    .font(.caption)
+                    .foregroundStyle(.red.opacity(0.8))
+                    .padding(.horizontal)
+            }
         }
     }
     
@@ -106,7 +91,6 @@ struct PiPSectionView: View {
 }
 
 #Preview {
-    List {
-        PiPSectionView(pipManager: PiPManager.shared)
-    }
+    PiPSectionView(pipManager: PiPManager.shared)
+        .padding()
 }

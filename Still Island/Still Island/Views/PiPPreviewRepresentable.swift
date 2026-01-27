@@ -74,10 +74,20 @@ struct PiPStaticPreview: View {
             // Background matching provider style
             backgroundColor
             
-            // Content preview - larger text for iOS Shortcuts style
-            Text(previewText)
-                .font(.system(size: 32, weight: .semibold, design: .monospaced))
-                .foregroundStyle(foregroundColor)
+            // Content preview
+            switch providerType {
+            case .camera:
+                // Camera shows icon instead of text
+                VStack(spacing: 8) {
+                    Image(systemName: "video.fill")
+                        .font(.system(size: 28, weight: .medium))
+                        .foregroundStyle(.white.opacity(0.8))
+                }
+            default:
+                Text(previewText)
+                    .font(.system(size: 32, weight: .semibold, design: .monospaced))
+                    .foregroundStyle(foregroundColor)
+            }
         }
     }
     
@@ -87,6 +97,8 @@ struct PiPStaticPreview: View {
             return Color(red: 0.1, green: 0.1, blue: 0.15)
         case .timer:
             return Color(red: 0.1, green: 0.15, blue: 0.1)
+        case .camera:
+            return Color(red: 0.15, green: 0.12, blue: 0.18)
         }
     }
     
@@ -96,6 +108,8 @@ struct PiPStaticPreview: View {
             return .white
         case .timer:
             return Color(red: 0.4, green: 1.0, blue: 0.4)
+        case .camera:
+            return .white
         }
     }
     
@@ -107,6 +121,8 @@ struct PiPStaticPreview: View {
             return formatter.string(from: Date())
         case .timer:
             return "00:00"
+        case .camera:
+            return ""
         }
     }
 }

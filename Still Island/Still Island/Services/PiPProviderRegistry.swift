@@ -12,6 +12,7 @@ import Foundation
 enum PiPProviderType: String, CaseIterable, Identifiable {
     case time = "time"
     case timer = "timer"
+    case camera = "camera"
     
     var id: String { rawValue }
     
@@ -19,6 +20,7 @@ enum PiPProviderType: String, CaseIterable, Identifiable {
         switch self {
         case .time: return TimeDisplayProvider.displayName
         case .timer: return TimerProvider.displayName
+        case .camera: return CameraProvider.displayName
         }
     }
     
@@ -26,6 +28,7 @@ enum PiPProviderType: String, CaseIterable, Identifiable {
         switch self {
         case .time: return TimeDisplayProvider.iconName
         case .timer: return TimerProvider.iconName
+        case .camera: return CameraProvider.iconName
         }
     }
     
@@ -36,6 +39,8 @@ enum PiPProviderType: String, CaseIterable, Identifiable {
             return TimeDisplayProvider()
         case .timer:
             return TimerProvider()
+        case .camera:
+            return CameraProvider()
         }
     }
 }

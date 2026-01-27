@@ -12,43 +12,49 @@ struct ContentView: View {
     @StateObject private var pipManager = PiPManager.shared
     
     var body: some View {
-        NavigationSplitView {
-            List {
-                // PiP Control Section - dual-column layout
-                PiPSectionView(pipManager: pipManager)
-                
-                // Statistics Navigation
-                Section {
+        NavigationStack {
+            ScrollView {
+                VStack(spacing: 24) {
+                    // Top spacing for breathing room
+                    Spacer()
+                        .frame(height: 20)
+                    
+                    // PiP Control Section - dual-column layout
+                    PiPSectionView(pipManager: pipManager)
+                        .padding(.horizontal, 20)
+                    
+                    // Statistics Navigation - entire row is tappable
                     NavigationLink {
                         StatisticsView()
                     } label: {
-                        HStack {
+                        HStack(spacing: 12) {
                             Image(systemName: "chart.bar.fill")
-                                .font(.title2)
-                                .foregroundStyle(.blue)
-                            VStack(alignment: .leading) {
-                                Text("使用统计")
-                                    .font(.headline)
-                                Text("查看悬浮窗口使用时长")
-                                    .font(.caption)
-                                    .foregroundStyle(.secondary)
-                            }
+                                .font(.system(size: 16))
+                                .foregroundStyle(.secondary)
+                            
+                            Text("使用统计")
+                                .font(.system(size: 15))
+                                .foregroundStyle(.secondary)
+                            
+                            Spacer()
+                            
+                            Image(systemName: "chevron.right")
+                                .font(.system(size: 12, weight: .semibold))
+                                .foregroundStyle(.quaternary)
                         }
+                        .padding(.horizontal, 20)
+                        .padding(.vertical, 14)
+                        .contentShape(Rectangle())
                     }
-                } header: {
-                    Text("数据")
+                    .buttonStyle(.plain)
+                    
+                    Spacer()
+                        .frame(height: 40)
                 }
             }
-            .navigationTitle("觉知")
-        } detail: {
-            VStack(spacing: 20) {
-                Image(systemName: "clock.badge.checkmark")
-                    .font(.system(size: 60))
-                    .foregroundStyle(.secondary)
-                Text("保持觉知，珍惜时间")
-                    .font(.title2)
-                    .foregroundStyle(.secondary)
-            }
+            .background(Color(.systemGroupedBackground))
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar(.hidden, for: .navigationBar)
         }
     }
 }

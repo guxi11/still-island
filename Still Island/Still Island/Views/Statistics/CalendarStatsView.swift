@@ -15,76 +15,83 @@ struct CalendarStatsView: View {
     @State private var showDayDetail = false
     
     private let calendar = Calendar.current
-    private let weekdaySymbols = Calendar.current.shortWeekdaySymbols
+    private let weekdaySymbols = ["日", "一", "二", "三", "四", "五", "六"]
     
     var body: some View {
-        VStack(spacing: 16) {
-            // Month navigation
-            HStack {
-                Button(action: previousMonth) {
-                    Image(systemName: "chevron.left")
-                        .font(.title3)
-                        .foregroundStyle(.blue)
-                }
-                
-                Spacer()
-                
-                Text(monthYearString)
-                    .font(.headline)
-                
-                Spacer()
-                
-                Button(action: nextMonth) {
-                    Image(systemName: "chevron.right")
-                        .font(.title3)
-                        .foregroundStyle(.blue)
-                }
-            }
-            .padding(.horizontal)
-            
-            // Weekday headers
-            HStack(spacing: 0) {
-                ForEach(weekdaySymbols, id: \.self) { symbol in
-                    Text(symbol)
-                        .font(.caption)
-                        .fontWeight(.medium)
-                        .foregroundStyle(.secondary)
-                        .frame(maxWidth: .infinity)
-                }
-            }
-            
-            // Calendar grid
-            LazyVGrid(columns: Array(repeating: GridItem(.flexible()), count: 7), spacing: 8) {
-                ForEach(daysInMonth, id: \.self) { date in
-                    if let date = date {
-                        DayCell(
-                            date: date,
-                            isSelected: calendar.isDate(date, inSameDayAs: selectedDate),
-                            isToday: calendar.isDateInToday(date),
-                            duration: tracker.totalDuration(for: date),
-                            maxDuration: maxDurationInMonth
-                        )
-                        .onTapGesture {
-                            selectedDate = date
-                            showDayDetail = true
-                        }
-                    } else {
-                        // Empty cell for padding
-                        Color.clear
-                            .aspectRatio(1, contentMode: .fill)
+        ScrollView {
+            VStack(spacing: 20) {
+                // Month navigation
+                HStack {
+                    Button(action: previousMonth) {
+                        Image(systemName: "chevron.left")
+                            .font(.system(size: 16, weight: .medium))
+                            .foregroundStyle(.blue)
+                            .frame(width: 36, height: 36)
+                    }
+                    
+                    Spacer()
+                    
+                    Text(monthYearString)
+                        .font(.system(size: 17, weight: .semibold))
+                    
+                    Spacer()
+                    
+                    Button(action: nextMonth) {
+                        Image(systemName: "chevron.right")
+                            .font(.system(size: 16, weight: .medium))
+                            .foregroundStyle(.blue)
+                            .frame(width: 36, height: 36)
                     }
                 }
+                .padding(.horizontal, 20)
+                .padding(.top, 8)
+                
+                // Weekday headers
+                HStack(spacing: 0) {
+                    ForEach(weekdaySymbols, id: \.self) { symbol in
+                        Text(symbol)
+                            .font(.system(size: 12, weight: .medium))
+                            .foregroundStyle(.tertiary)
+                            .frame(maxWidth: .infinity)
+                    }
+                }
+                .padding(.horizontal, 20)
+                
+                // Calendar grid
+                LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 8), count: 7), spacing: 8) {
+                    ForEach(daysInMonth, id: \.self) { date in
+                        if let date = date {
+                            DayCell(
+                                date: date,
+                                isSelected: calendar.isDate(date, inSameDayAs: selectedDate),
+                                isToday: calendar.isDateInToday(date),
+                                duration: tracker.totalDuration(for: date),
+                                maxDuration: maxDurationInMonth
+                            )
+                            .onTapGesture {
+                                selectedDate = date
+                                showDayDetail = true
+                            }
+                        } else {
+                            Color.clear
+                                .aspectRatio(1, contentMode: .fill)
+                        }
+                    }
+                }
+                .padding(.horizontal, 20)
+                
+                Spacer(minLength: 40)
             }
-            .padding(.horizontal)
-            
-            Spacer()
         }
-        .padding(.top)
+        .background(Color(.systemGroupedBackground))
+        .navigationTitle("日历")
+        .navigationBarTitleDisplayMode(.inline)
         .sheet(isPresented: $showDayDetail) {
             NavigationStack {
                 DayDetailView(date: selectedDate)
             }
             .presentationDetents([.medium, .large])
+            .presentationDragIndicator(.visible)
         }
     }
     
@@ -100,13 +107,9 @@ struct CalendarStatsView: View {
         let startOfMonth = calendar.date(from: calendar.dateComponents([.year, .month], from: currentMonth))!
         let range = calendar.range(of: .day, in: .month, for: startOfMonth)!
         
-        // Get the weekday of the first day (1 = Sunday, 2 = Monday, etc.)
         let firstWeekday = calendar.component(.weekday, from: startOfMonth)
-        
-        // Create array with padding for days before the month starts
         var days: [Date?] = Array(repeating: nil, count: firstWeekday - 1)
         
-        // Add all days in the month
         for day in range {
             if let date = calendar.date(byAdding: .day, value: day - 1, to: startOfMonth) {
                 days.append(date)
@@ -128,13 +131,17 @@ struct CalendarStatsView: View {
     
     private func previousMonth() {
         if let newMonth = calendar.date(byAdding: .month, value: -1, to: currentMonth) {
-            currentMonth = newMonth
+            withAnimation(.easeInOut(duration: 0.2)) {
+                currentMonth = newMonth
+            }
         }
     }
     
     private func nextMonth() {
         if let newMonth = calendar.date(byAdding: .month, value: 1, to: currentMonth) {
-            currentMonth = newMonth
+            withAnimation(.easeInOut(duration: 0.2)) {
+                currentMonth = newMonth
+            }
         }
     }
 }
@@ -150,47 +157,47 @@ struct DayCell: View {
     private let calendar = Calendar.current
     
     var body: some View {
-        ZStack {
-            // Background indicating usage intensity
-            RoundedRectangle(cornerRadius: 8)
-                .fill(backgroundFill)
-            
-            // Day number
+        VStack(spacing: 4) {
             Text("\(calendar.component(.day, from: date))")
-                .font(.callout)
-                .fontWeight(isToday ? .bold : .regular)
+                .font(.system(size: 15, weight: isToday ? .bold : .regular))
                 .foregroundStyle(textColor)
+            
+            Circle()
+                .fill(dotColor)
+                .frame(width: dotSize, height: dotSize)
+                .opacity(duration > 0 ? 1 : 0)
         }
+        .frame(maxWidth: .infinity)
         .aspectRatio(1, contentMode: .fill)
+        .background(
+            RoundedRectangle(cornerRadius: 10)
+                .fill(isSelected ? Color.blue.opacity(0.12) : Color.clear)
+        )
         .overlay(
-            RoundedRectangle(cornerRadius: 8)
-                .stroke(isSelected ? Color.blue : Color.clear, lineWidth: 2)
+            RoundedRectangle(cornerRadius: 10)
+                .stroke(isToday ? Color.blue.opacity(0.5) : Color.clear, lineWidth: 1.5)
         )
     }
     
-    private var backgroundFill: Color {
-        if duration == 0 {
-            return Color(.tertiarySystemGroupedBackground)
-        }
-        
-        // Calculate intensity based on duration relative to max
+    private var dotColor: Color {
+        if duration == 0 { return .clear }
         let intensity = maxDuration > 0 ? min(duration / maxDuration, 1.0) : 0
-        let opacity = 0.2 + (intensity * 0.6) // Range from 0.2 to 0.8
-        
-        return Color.green.opacity(opacity)
+        return Color.blue.opacity(0.4 + (intensity * 0.6))
+    }
+    
+    private var dotSize: CGFloat {
+        if duration == 0 { return 0 }
+        let intensity = maxDuration > 0 ? min(duration / maxDuration, 1.0) : 0
+        return 4 + (CGFloat(intensity) * 4)
     }
     
     private var textColor: Color {
-        if isToday {
-            return .blue
-        }
-        if duration > 0 && duration / maxDuration > 0.5 {
-            return .white
-        }
-        return .primary
+        isToday ? .blue : .primary
     }
 }
 
 #Preview {
-    CalendarStatsView(selectedDate: .constant(Date()))
+    NavigationStack {
+        CalendarStatsView(selectedDate: .constant(Date()))
+    }
 }
