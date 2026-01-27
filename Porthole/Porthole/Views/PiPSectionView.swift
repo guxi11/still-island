@@ -23,8 +23,18 @@ struct PiPSectionView: View {
         GridItem(.flexible(), spacing: 16)
     ]
     
+    /// Whether any PiP is currently active or preparing
+    private var isPiPRunning: Bool {
+        pipManager.isPiPActive || pipManager.isPreparingPiP
+    }
+    
     var body: some View {
         VStack(spacing: 20) {
+            // Top empty area - reserved for PiP window
+            // Will be replaced with dynamic image in the future
+            Spacer()
+                .frame(height: 120)
+            
             // Dual-column grid of providers - minimal artistic style
             // PiP host view is embedded inside each card (no external host)
             LazyVGrid(columns: columns, spacing: 16) {

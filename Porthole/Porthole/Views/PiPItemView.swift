@@ -57,7 +57,7 @@ struct PiPItemView: View {
                     .opacity(0.01)
                 }
             }
-            .frame(height: 100)
+            .frame(height: 110)
             .clipShape(RoundedRectangle(cornerRadius: 20))
             .shadow(color: .black.opacity(showSilhouette ? 0.05 : 0.08), radius: showSilhouette ? 4 : 8, x: 0, y: showSilhouette ? 2 : 4)
             .scaleEffect(isPressed ? 0.96 : 1.0)
@@ -79,27 +79,17 @@ struct PiPItemView: View {
             // Preview fills entire card
             PiPStaticPreview(providerType: providerType)
             
-            // Label overlay at bottom-left
+            // Label at bottom-left - simple text
             VStack {
                 Spacer()
                 HStack {
-                    HStack(spacing: 6) {
-                        Image(systemName: providerType.iconName)
-                            .font(.system(size: 11, weight: .medium))
-                        Text(providerType.displayName)
-                            .font(.system(size: 13, weight: .medium))
-                    }
-                    .foregroundStyle(.white)
-                    .padding(.horizontal, 10)
-                    .padding(.vertical, 6)
-                    .background(
-                        Capsule()
-                            .fill(.ultraThinMaterial)
-                            .environment(\.colorScheme, .dark)
-                    )
+                    Text(providerType.displayName)
+                        .font(.system(size: 13, weight: .medium))
+                        .foregroundStyle(.white.opacity(0.9))
+                        .shadow(color: .black.opacity(0.3), radius: 2, x: 0, y: 1)
                     Spacer()
                 }
-                .padding(10)
+                .padding(12)
             }
             
             // Preparing indicator at top-right
