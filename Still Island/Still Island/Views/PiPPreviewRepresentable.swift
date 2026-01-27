@@ -60,7 +60,12 @@ struct PiPPreviewRepresentable: UIViewRepresentable {
         var contentView: UIView?
         
         deinit {
-            provider?.stop()
+            // Stop provider on main actor
+            if let provider = provider {
+                Task { @MainActor in
+                    provider.stop()
+                }
+            }
         }
     }
 }

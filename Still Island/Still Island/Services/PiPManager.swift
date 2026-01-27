@@ -3,6 +3,7 @@
 //  Still Island
 //
 //  Manages Picture-in-Picture window lifecycle using AVPictureInPictureVideoCallViewController.
+//  Supports both UIView-based providers and DirectVideoProvider for background operation.
 //
 
 import UIKit
@@ -11,6 +12,7 @@ import Combine
 
 /// Singleton manager for Picture-in-Picture functionality.
 /// Uses AVPictureInPictureVideoCallViewController for custom content display.
+/// Supports DirectVideoProvider for providers that output video frames directly (e.g., camera).
 @MainActor
 final class PiPManager: NSObject, ObservableObject {
     
@@ -31,6 +33,10 @@ final class PiPManager: NSObject, ObservableObject {
     
     /// The display layer for preview (uses sample buffer approach for preview)
     var displayLayer: AVSampleBufferDisplayLayer? {
+        // For direct video providers, use the dedicated layer
+        if directVideoDisplayLayer != nil {
+            return directVideoDisplayLayer
+        }
         return videoStreamConverter?.displayLayer
     }
     
@@ -40,6 +46,15 @@ final class PiPManager: NSObject, ObservableObject {
     private var pipVideoCallVC: AVPictureInPictureVideoCallViewController?
     private var videoStreamConverter: ViewToVideoStreamConverter?
     private var currentProvider: PiPContentProvider?
+    
+    /// Display layer for DirectVideoProvider (camera, etc.)
+    private var directVideoDisplayLayer: AVSampleBufferDisplayLayer?
+    
+    /// Display view inside the PiP window for direct video providers
+    private var pipDisplayView: SampleBufferDisplayView?
+    
+    /// Whether current provider uses direct video output
+    private var isDirectVideoProvider: Bool = false
     
     // Reference to the view that hosts the display layer
     private weak var hostView: SampleBufferDisplayView?
@@ -89,6 +104,43 @@ final class PiPManager: NSObject, ObservableObject {
         currentProvider = provider
         currentProviderType = type(of: provider).providerType
         
+        // Check if provider supports direct video output
+        if let directProvider = provider as? DirectVideoProvider, directProvider.providesDirectVideoOutput {
+            print("[PiPManager] Provider supports direct video output")
+            isDirectVideoProvider = true
+            prepareDirectVideoProvider(directProvider)
+        } else {
+            print("[PiPManager] Provider uses UIView capture")
+            isDirectVideoProvider = false
+            prepareViewBasedProvider(provider)
+        }
+    }
+    
+    // MARK: - Direct Video Provider Setup
+    
+    private func prepareDirectVideoProvider(_ provider: DirectVideoProvider) {
+        // Create a dedicated display layer for direct video
+        let layer = AVSampleBufferDisplayLayer()
+        layer.videoGravity = .resizeAspect
+        layer.backgroundColor = UIColor.black.cgColor
+        directVideoDisplayLayer = layer
+        
+        // Give the layer to the provider
+        provider.setOutputLayer(layer)
+        
+        // Ensure the content view has valid size (for PiP VC)
+        let contentView = provider.contentView
+        if contentView.bounds.size.width == 0 || contentView.bounds.size.height == 0 {
+            contentView.frame = CGRect(x: 0, y: 0, width: 200, height: 100)
+        }
+        contentView.layoutIfNeeded()
+        
+        print("[PiPManager] Direct video provider prepared, waiting for view binding...")
+    }
+    
+    // MARK: - View-Based Provider Setup
+    
+    private func prepareViewBasedProvider(_ provider: PiPContentProvider) {
         // Create converter for preview
         let converter = ViewToVideoStreamConverter()
         videoStreamConverter = converter
@@ -116,32 +168,53 @@ final class PiPManager: NSObject, ObservableObject {
         
         converter.setContentView(contentView)
         
-        // Start content provider
-        provider.start()
-        
-        print("[PiPManager] Preparation complete. Waiting for view binding...")
+        print("[PiPManager] View-based provider prepared, waiting for view binding...")
     }
     
     /// Binds the converter to the view's display layer and starts capture.
     func bindToViewLayer(_ view: SampleBufferDisplayView) {
-        guard let converter = videoStreamConverter else {
-            print("[PiPManager] bindToViewLayer: no converter")
-            return
-        }
-        
         print("[PiPManager] Binding to view's display layer")
         hostView = view
         
-        // Switch to using the view's layer
-        let viewLayer = view.sampleBufferDisplayLayer
-        converter.setDisplayLayer(viewLayer)
-        
-        print("[PiPManager] View layer: \(viewLayer)")
-        
-        // Start video capture for preview
-        converter.startCapture(frameRate: currentProvider?.preferredFrameRate ?? 10)
-        
-        print("[PiPManager] Video capture started. Setting up PiP controller...")
+        if isDirectVideoProvider {
+            // For direct video providers, we use the view's layer directly
+            let viewLayer = view.sampleBufferDisplayLayer
+            
+            // Transfer configuration from our display layer to view's layer
+            if let directLayer = directVideoDisplayLayer {
+                viewLayer.videoGravity = directLayer.videoGravity
+                viewLayer.backgroundColor = directLayer.backgroundColor
+            }
+            
+            // Update provider with the actual view layer
+            if let directProvider = currentProvider as? DirectVideoProvider {
+                directProvider.setOutputLayer(viewLayer)
+            }
+            
+            // Start the provider now
+            currentProvider?.start()
+            
+            print("[PiPManager] Direct video provider started")
+        } else {
+            // For view-based providers, use the converter
+            guard let converter = videoStreamConverter else {
+                print("[PiPManager] bindToViewLayer: no converter")
+                return
+            }
+            
+            let viewLayer = view.sampleBufferDisplayLayer
+            converter.setDisplayLayer(viewLayer)
+            
+            print("[PiPManager] View layer: \(viewLayer)")
+            
+            // Start video capture for preview
+            converter.startCapture(frameRate: currentProvider?.preferredFrameRate ?? 10)
+            
+            // Start the provider
+            currentProvider?.start()
+            
+            print("[PiPManager] Video capture started")
+        }
         
         // Wait for view to be in window hierarchy, then setup controller
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak self] in
@@ -179,8 +252,29 @@ final class PiPManager: NSObject, ObservableObject {
         videoCallVC.preferredContentSize = CGSize(width: 200, height: 100)
         pipVideoCallVC = videoCallVC
         
-        // Add the time display view to the video call VC
-        if let provider = currentProvider {
+        if isDirectVideoProvider {
+            // For direct video providers, create a SampleBufferDisplayView inside the videoCallVC
+            // This is where the camera frames will be displayed in the PiP window
+            let displayView = SampleBufferDisplayView()
+            displayView.translatesAutoresizingMaskIntoConstraints = false
+            videoCallVC.view.addSubview(displayView)
+            
+            NSLayoutConstraint.activate([
+                displayView.topAnchor.constraint(equalTo: videoCallVC.view.topAnchor),
+                displayView.leadingAnchor.constraint(equalTo: videoCallVC.view.leadingAnchor),
+                displayView.trailingAnchor.constraint(equalTo: videoCallVC.view.trailingAnchor),
+                displayView.bottomAnchor.constraint(equalTo: videoCallVC.view.bottomAnchor)
+            ])
+            
+            // Store reference to the PiP display view
+            pipDisplayView = displayView
+            
+            // Connect the provider to this display layer
+            if let directProvider = currentProvider as? DirectVideoProvider {
+                directProvider.setOutputLayer(displayView.sampleBufferDisplayLayer)
+                print("[PiPManager] Connected direct video provider to PiP display layer")
+            }
+        } else if let provider = currentProvider {
             let contentView = provider.contentView
             contentView.translatesAutoresizingMaskIntoConstraints = false
             videoCallVC.view.addSubview(contentView)
@@ -258,9 +352,13 @@ final class PiPManager: NSObject, ObservableObject {
         // Stop PiP controller
         pipController?.stopPictureInPicture()
         
-        // Stop video converter
+        // Stop video converter (for view-based providers)
         videoStreamConverter?.stopCapture()
         videoStreamConverter = nil
+        
+        // Clean up direct video layer
+        directVideoDisplayLayer = nil
+        pipDisplayView = nil
         
         // Remove content view from video call VC before releasing
         if let provider = currentProvider {
@@ -283,6 +381,7 @@ final class PiPManager: NSObject, ObservableObject {
         isPreparingPiP = false
         errorMessage = nil
         currentProviderType = nil
+        isDirectVideoProvider = false
         
         print("[PiPManager] stopPiP completed")
     }
@@ -293,9 +392,13 @@ final class PiPManager: NSObject, ObservableObject {
         
         if isPlaying {
             currentProvider?.start()
-            videoStreamConverter?.startCapture(frameRate: currentProvider?.preferredFrameRate ?? 10)
+            if !isDirectVideoProvider {
+                videoStreamConverter?.startCapture(frameRate: currentProvider?.preferredFrameRate ?? 10)
+            }
         } else {
-            videoStreamConverter?.stopCapture()
+            if !isDirectVideoProvider {
+                videoStreamConverter?.stopCapture()
+            }
             currentProvider?.stop()
         }
     }

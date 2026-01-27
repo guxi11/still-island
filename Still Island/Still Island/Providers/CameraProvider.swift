@@ -3,16 +3,18 @@
 //  Still Island
 //
 //  Provides rear camera (实景) preview for PiP display.
-//  Camera continues running when app enters background via PiP.
+//  Uses AVCaptureVideoPreviewLayer for better system integration.
 //
 
 import UIKit
 import AVFoundation
+import CoreMedia
 
 /// A content provider that displays rear camera preview in PiP window.
-/// The camera session continues running when the app enters background.
+/// Uses AVCaptureVideoPreviewLayer directly embedded in contentView for
+/// better compatibility with PiP and potential background operation.
 @MainActor
-final class CameraProvider: PiPContentProvider {
+final class CameraProvider: NSObject, PiPContentProvider {
     
     // MARK: - PiPContentProvider Static Properties
     
@@ -20,7 +22,7 @@ final class CameraProvider: PiPContentProvider {
     static let displayName: String = "实景"
     static let iconName: String = "video.fill"
     
-    // MARK: - PiPContentProvider
+    // MARK: - PiPContentProvider Properties
     
     let contentView: UIView
     let preferredFrameRate: Int = 30
@@ -29,45 +31,51 @@ final class CameraProvider: PiPContentProvider {
     
     private var captureSession: AVCaptureSession?
     private var previewLayer: AVCaptureVideoPreviewLayer?
+    
     private let placeholderLabel: UILabel
     private var isRunning = false
-    private var backgroundObserver: NSObjectProtocol?
-    private var foregroundObserver: NSObjectProtocol?
+    
+    // Notification observers
+    private var interruptionObserver: NSObjectProtocol?
+    private var interruptionEndedObserver: NSObjectProtocol?
+    private var appDidBecomeActiveObserver: NSObjectProtocol?
     
     // MARK: - Initialization
     
-    init() {
-        // Create container view with fixed size
+    override init() {
+        // Create container view
         let containerSize = CGSize(width: 200, height: 100)
         let container = UIView(frame: CGRect(origin: .zero, size: containerSize))
-        container.backgroundColor = UIColor(red: 0.1, green: 0.1, blue: 0.15, alpha: 1.0)
+        container.backgroundColor = UIColor.black
         container.clipsToBounds = true
         
-        // Create placeholder label (shown when camera is not available)
+        // Create placeholder label
         let label = UILabel(frame: container.bounds)
         label.font = UIFont.systemFont(ofSize: 14, weight: .medium)
         label.textColor = .white.withAlphaComponent(0.6)
         label.textAlignment = .center
         label.text = "实景加载中..."
         label.backgroundColor = .clear
+        label.autoresizingMask = [.flexibleWidth, .flexibleHeight]
         container.addSubview(label)
         
         self.contentView = container
         self.placeholderLabel = label
         
-        // Force layout
-        container.setNeedsLayout()
-        container.layoutIfNeeded()
+        super.init()
         
-        print("[CameraProvider] Initialized with view size: \(container.bounds.size)")
+        print("[CameraProvider] Initialized")
     }
     
     deinit {
-        // Remove observers
-        if let observer = backgroundObserver {
+        // Clean up observers
+        if let observer = interruptionObserver {
             NotificationCenter.default.removeObserver(observer)
         }
-        if let observer = foregroundObserver {
+        if let observer = interruptionEndedObserver {
+            NotificationCenter.default.removeObserver(observer)
+        }
+        if let observer = appDidBecomeActiveObserver {
             NotificationCenter.default.removeObserver(observer)
         }
     }
@@ -80,16 +88,13 @@ final class CameraProvider: PiPContentProvider {
         guard !isRunning else { return }
         isRunning = true
         
-        // Setup app lifecycle observers to keep camera running in background
-        setupLifecycleObservers()
-        
         // Check camera authorization
         switch AVCaptureDevice.authorizationStatus(for: .video) {
         case .authorized:
             setupCamera()
         case .notDetermined:
             AVCaptureDevice.requestAccess(for: .video) { [weak self] granted in
-                DispatchQueue.main.async {
+                Task { @MainActor in
                     if granted {
                         self?.setupCamera()
                     } else {
@@ -108,62 +113,48 @@ final class CameraProvider: PiPContentProvider {
         print("[CameraProvider] stop()")
         isRunning = false
         
-        // Remove lifecycle observers
-        if let observer = backgroundObserver {
+        // Remove notification observers
+        if let observer = interruptionObserver {
             NotificationCenter.default.removeObserver(observer)
-            backgroundObserver = nil
+            interruptionObserver = nil
         }
-        if let observer = foregroundObserver {
+        if let observer = interruptionEndedObserver {
             NotificationCenter.default.removeObserver(observer)
-            foregroundObserver = nil
+            interruptionEndedObserver = nil
+        }
+        if let observer = appDidBecomeActiveObserver {
+            NotificationCenter.default.removeObserver(observer)
+            appDidBecomeActiveObserver = nil
         }
         
         captureSession?.stopRunning()
-        captureSession = nil
         previewLayer?.removeFromSuperlayer()
         previewLayer = nil
+        captureSession = nil
     }
     
     // MARK: - Private Methods
     
-    private func setupLifecycleObservers() {
-        // When app enters background, keep camera running if PiP is active
-        backgroundObserver = NotificationCenter.default.addObserver(
-            forName: UIApplication.didEnterBackgroundNotification,
-            object: nil,
-            queue: .main
-        ) { [weak self] _ in
-            print("[CameraProvider] App entered background - keeping camera active for PiP")
-            // Camera session continues running - no action needed
-            // The PiP window will continue to display the camera feed
-        }
-        
-        // When app returns to foreground
-        foregroundObserver = NotificationCenter.default.addObserver(
-            forName: UIApplication.willEnterForegroundNotification,
-            object: nil,
-            queue: .main
-        ) { [weak self] _ in
-            print("[CameraProvider] App entering foreground")
-            // Ensure camera is still running
-            if let session = self?.captureSession, !session.isRunning {
-                DispatchQueue.global(qos: .userInitiated).async {
-                    session.startRunning()
-                }
-            }
-        }
-    }
-    
     private func setupCamera() {
         print("[CameraProvider] Setting up camera...")
+        
+        // Configure audio session
+        configureAudioSession()
         
         let session = AVCaptureSession()
         session.sessionPreset = .medium
         
-        // Configure session for background use
-        session.automaticallyConfiguresApplicationAudioSession = false
+        // Enable multitasking camera access (iOS 16+)
+        if #available(iOS 16.0, *) {
+            if session.isMultitaskingCameraAccessSupported {
+                session.isMultitaskingCameraAccessEnabled = true
+                print("[CameraProvider] Multitasking camera access enabled")
+            } else {
+                print("[CameraProvider] Multitasking camera access not supported")
+            }
+        }
         
-        // Get the back camera (rear camera for "实景")
+        // Get the back camera
         guard let camera = AVCaptureDevice.default(.builtInWideAngleCamera, for: .video, position: .back) else {
             showError("未找到相机")
             return
@@ -180,24 +171,31 @@ final class CameraProvider: PiPContentProvider {
             return
         }
         
-        // Create preview layer
-        let preview = AVCaptureVideoPreviewLayer(session: session)
-        preview.frame = contentView.bounds
-        preview.videoGravity = .resizeAspectFill
+        self.captureSession = session
         
-        // No mirroring for back camera
+        // Create and add preview layer
+        let preview = AVCaptureVideoPreviewLayer(session: session)
+        preview.videoGravity = .resizeAspectFill
+        preview.frame = contentView.bounds
+        
+        // Set video orientation
         if let connection = preview.connection {
-            connection.automaticallyAdjustsVideoMirroring = false
-            connection.isVideoMirrored = false
+            if connection.isVideoRotationAngleSupported(90) {
+                connection.videoRotationAngle = 90
+            }
         }
         
         contentView.layer.insertSublayer(preview, at: 0)
-        
-        self.captureSession = session
         self.previewLayer = preview
         
         // Hide placeholder
         placeholderLabel.isHidden = true
+        
+        // Setup interruption handling
+        setupInterruptionHandling(for: session)
+        
+        // Setup app lifecycle handling
+        setupAppLifecycleHandling(for: session)
         
         // Start capture session on background thread
         DispatchQueue.global(qos: .userInitiated).async {
@@ -206,8 +204,79 @@ final class CameraProvider: PiPContentProvider {
         }
     }
     
+    /// Setup notification handlers for capture session interruption
+    private func setupInterruptionHandling(for session: AVCaptureSession) {
+        interruptionObserver = NotificationCenter.default.addObserver(
+            forName: AVCaptureSession.wasInterruptedNotification,
+            object: session,
+            queue: .main
+        ) { notification in
+            if let reason = notification.userInfo?[AVCaptureSessionInterruptionReasonKey] as? Int,
+               let interruptionReason = AVCaptureSession.InterruptionReason(rawValue: reason) {
+                print("[CameraProvider] Session interrupted: \(interruptionReason.rawValue)")
+            } else {
+                print("[CameraProvider] Session interrupted (unknown reason)")
+            }
+        }
+        
+        let capturedSession = session
+        interruptionEndedObserver = NotificationCenter.default.addObserver(
+            forName: AVCaptureSession.interruptionEndedNotification,
+            object: session,
+            queue: .main
+        ) { [weak self] _ in
+            print("[CameraProvider] Session interruption ended")
+            Task { @MainActor in
+                guard let self = self, self.isRunning else { return }
+                if !capturedSession.isRunning {
+                    DispatchQueue.global(qos: .userInitiated).async {
+                        capturedSession.startRunning()
+                        print("[CameraProvider] Session resumed")
+                    }
+                }
+            }
+        }
+    }
+    
+    /// Setup app lifecycle handling to resume camera when returning to foreground
+    private func setupAppLifecycleHandling(for session: AVCaptureSession) {
+        let capturedSession = session
+        appDidBecomeActiveObserver = NotificationCenter.default.addObserver(
+            forName: UIApplication.didBecomeActiveNotification,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            Task { @MainActor in
+                guard let self = self, self.isRunning else { return }
+                print("[CameraProvider] App became active, checking session...")
+                if !capturedSession.isRunning {
+                    DispatchQueue.global(qos: .userInitiated).async {
+                        capturedSession.startRunning()
+                        print("[CameraProvider] Session restarted on app active")
+                    }
+                }
+            }
+        }
+    }
+    
     private func showError(_ message: String) {
         placeholderLabel.text = message
         placeholderLabel.isHidden = false
+    }
+    
+    private func configureAudioSession() {
+        do {
+            let audioSession = AVAudioSession.sharedInstance()
+            try audioSession.setCategory(.playback, mode: .moviePlayback, options: [.mixWithOthers])
+            try audioSession.setActive(true)
+            print("[CameraProvider] Audio session configured")
+        } catch {
+            print("[CameraProvider] Failed to configure audio session: \(error)")
+        }
+    }
+    
+    // Called when contentView's bounds change
+    func updatePreviewLayerFrame() {
+        previewLayer?.frame = contentView.bounds
     }
 }
