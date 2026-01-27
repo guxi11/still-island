@@ -27,15 +27,16 @@ final class CelebrationView: UIView {
     /// Callback when celebration animation completes
     var onComplete: (() -> Void)?
     
-    // Confetti colors - bright and festive
+    // Confetti colors - bright, festive firework-like colors
     private let confettiColors: [UIColor] = [
-        UIColor(red: 1.0, green: 0.42, blue: 0.42, alpha: 1.0),  // Red
-        UIColor(red: 1.0, green: 0.6, blue: 0.2, alpha: 1.0),   // Orange
-        UIColor(red: 1.0, green: 0.85, blue: 0.3, alpha: 1.0),  // Yellow
-        UIColor(red: 0.4, green: 0.85, blue: 0.4, alpha: 1.0),  // Green
-        UIColor(red: 0.4, green: 0.7, blue: 1.0, alpha: 1.0),   // Blue
-        UIColor(red: 0.7, green: 0.5, blue: 1.0, alpha: 1.0),   // Purple
-        UIColor(red: 1.0, green: 0.5, blue: 0.7, alpha: 1.0),   // Pink
+        UIColor(red: 1.0, green: 0.35, blue: 0.35, alpha: 1.0),  // Red
+        UIColor(red: 1.0, green: 0.75, blue: 0.2, alpha: 1.0),   // Gold
+        UIColor(red: 1.0, green: 0.9, blue: 0.3, alpha: 1.0),    // Yellow
+        UIColor(red: 0.4, green: 0.9, blue: 0.5, alpha: 1.0),    // Green
+        UIColor(red: 0.4, green: 0.75, blue: 1.0, alpha: 1.0),   // Blue
+        UIColor(red: 0.85, green: 0.5, blue: 1.0, alpha: 1.0),   // Purple
+        UIColor(red: 1.0, green: 0.5, blue: 0.75, alpha: 1.0),   // Pink
+        UIColor.white,                                            // White sparkle
     ]
     
     // MARK: - Initialization
@@ -60,7 +61,7 @@ final class CelebrationView: UIView {
         containerView.translatesAutoresizingMaskIntoConstraints = false
         addSubview(containerView)
         
-        // Top label "你已经专注了"
+        // Top label
         topLabel = UILabel()
         topLabel.translatesAutoresizingMaskIntoConstraints = false
         topLabel.textAlignment = .center
@@ -79,7 +80,7 @@ final class CelebrationView: UIView {
         durationLabel.alpha = 0
         containerView.addSubview(durationLabel)
         
-        // Bottom label "恭喜你"
+        // Bottom label
         bottomLabel = UILabel()
         bottomLabel.translatesAutoresizingMaskIntoConstraints = false
         bottomLabel.textAlignment = .center
@@ -110,8 +111,8 @@ final class CelebrationView: UIView {
     
     /// Start the celebration animation
     func startCelebration() {
-        // Delay confetti animation by 0.5s to let user react after unlock
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak self] in
+        // Start immediately with a short delay
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) { [weak self] in
             guard let self = self else { return }
             // Setup and start confetti emitter
             self.setupConfettiEmitter()
@@ -120,8 +121,13 @@ final class CelebrationView: UIView {
             self.animateLabelsIn()
         }
         
-        // Schedule end of celebration (4s animation + 0.5s delay)
-        DispatchQueue.main.asyncAfter(deadline: .now() + 4.5) { [weak self] in
+        // Stop emitting after 3s (but existing particles continue falling)
+        DispatchQueue.main.asyncAfter(deadline: .now() + 3.2) { [weak self] in
+            self?.emitterLayer?.birthRate = 0
+        }
+        
+        // Schedule end of celebration (total 5s - gives user time to unlock and see it)
+        DispatchQueue.main.asyncAfter(deadline: .now() + 5.0) { [weak self] in
             self?.endCelebration()
         }
     }
@@ -132,12 +138,12 @@ final class CelebrationView: UIView {
         emitterLayer?.birthRate = 0
         
         // Fade out after confetti falls
-        UIView.animate(withDuration: 0.5, delay: 0.3) { [weak self] in
+        UIView.animate(withDuration: 0.3, delay: 0) { [weak self] in
             self?.emitterLayer?.opacity = 0
         }
         
         // Fade out labels
-        UIView.animate(withDuration: 0.3, delay: 0.2) { [weak self] in
+        UIView.animate(withDuration: 0.25, delay: 0) { [weak self] in
             self?.topLabel.alpha = 0
             self?.durationLabel.alpha = 0
             self?.bottomLabel.alpha = 0
@@ -167,23 +173,32 @@ final class CelebrationView: UIView {
         }
     }
     
-    // Setup confetti emitter with triangles and rectangles
+    // Setup confetti emitter - burst style like fireworks
     private func setupConfettiEmitter() {
         let emitter = CAEmitterLayer()
-        emitter.emitterPosition = CGPoint(x: bounds.midX, y: -20)
+        emitter.emitterPosition = CGPoint(x: bounds.midX, y: -10)
         emitter.emitterShape = .line
-        emitter.emitterSize = CGSize(width: bounds.width * 1.2, height: 1)
+        emitter.emitterSize = CGSize(width: bounds.width * 1.5, height: 1)
         
         var cells: [CAEmitterCell] = []
         
         // Create confetti cells with different shapes and colors
         for color in confettiColors {
+            // Small circle sparks (like firework sparks)
+            let sparkCell = createConfettiCell(
+                shape: .circle,
+                color: color,
+                birthRate: 6,
+                scale: 0.08
+            )
+            cells.append(sparkCell)
+            
             // Triangle confetti
             let triangleCell = createConfettiCell(
                 shape: .triangle,
                 color: color,
                 birthRate: 3,
-                scale: 0.12
+                scale: 0.1
             )
             cells.append(triangleCell)
             
@@ -192,7 +207,7 @@ final class CelebrationView: UIView {
                 shape: .rectangle,
                 color: color,
                 birthRate: 2,
-                scale: 0.1
+                scale: 0.08
             )
             cells.append(rectangleCell)
         }
@@ -205,6 +220,7 @@ final class CelebrationView: UIView {
     private enum ConfettiShape {
         case triangle
         case rectangle
+        case circle
     }
     
     private func createConfettiCell(
@@ -218,35 +234,38 @@ final class CelebrationView: UIView {
         // Create shape image
         switch shape {
         case .triangle:
-            cell.contents = createTriangleImage(size: CGSize(width: 12, height: 12), color: color)
+            cell.contents = createTriangleImage(size: CGSize(width: 10, height: 10), color: color)
         case .rectangle:
-            cell.contents = createRectangleImage(size: CGSize(width: 8, height: 14), color: color)
+            cell.contents = createRectangleImage(size: CGSize(width: 6, height: 12), color: color)
+        case .circle:
+            cell.contents = createCircleImage(size: CGSize(width: 8, height: 8), color: color)
         }
         
         cell.birthRate = birthRate
-        cell.lifetime = 4.0
-        cell.lifetimeRange = 1.0
+        cell.lifetime = 2.0
+        cell.lifetimeRange = 0.5
         
-        // Falling velocity
-        cell.velocity = 100
-        cell.velocityRange = 50
+        // Falling velocity - faster initial burst
+        cell.velocity = 120
+        cell.velocityRange = 60
         
         cell.emissionLongitude = .pi  // Downward
-        cell.emissionRange = .pi / 6  // Slight spread
+        cell.emissionRange = .pi / 4  // Wider spread for burst effect
         
-        // Add some horizontal drift
-        cell.xAcceleration = CGFloat.random(in: -20...20)
-        cell.yAcceleration = 30  // Gravity effect
+        // Add horizontal drift for natural movement
+        cell.xAcceleration = 0
+        cell.yAcceleration = 50  // Gravity effect
         
         cell.scale = scale
-        cell.scaleRange = scale * 0.3
+        cell.scaleRange = scale * 0.4
+        cell.scaleSpeed = -0.02  // Slightly shrink as they fall
         
-        // Spinning animation - key for confetti look
+        // Spinning animation
         cell.spin = .pi * 2
-        cell.spinRange = .pi * 4
+        cell.spinRange = .pi * 3
         
-        // Slight alpha fade at end
-        cell.alphaSpeed = -0.1
+        // Fade out as they fall
+        cell.alphaSpeed = -0.4
         
         return cell
     }
@@ -285,17 +304,31 @@ final class CelebrationView: UIView {
         return image?.cgImage
     }
     
+    // Create a circle image (spark-like)
+    private func createCircleImage(size: CGSize, color: UIColor) -> CGImage? {
+        UIGraphicsBeginImageContextWithOptions(size, false, 0)
+        guard let context = UIGraphicsGetCurrentContext() else { return nil }
+        
+        context.setFillColor(color.cgColor)
+        context.fillEllipse(in: CGRect(origin: .zero, size: size))
+        
+        let image = UIGraphicsGetImageFromCurrentImageContext()
+        UIGraphicsEndImageContext()
+        
+        return image?.cgImage
+    }
+    
     private func animateLabelsIn() {
         // Fade in top label first
-        UIView.animate(withDuration: 0.3, delay: 0) { [weak self] in
+        UIView.animate(withDuration: 0.25, delay: 0) { [weak self] in
             self?.topLabel.alpha = 1
         }
         
         // Scale and fade in duration label
         durationLabel.transform = CGAffineTransform(scaleX: 0.5, y: 0.5)
         UIView.animate(
-            withDuration: 0.5,
-            delay: 0.15,
+            withDuration: 0.4,
+            delay: 0.1,
             usingSpringWithDamping: 0.6,
             initialSpringVelocity: 0.8
         ) { [weak self] in
@@ -304,7 +337,7 @@ final class CelebrationView: UIView {
         }
         
         // Fade in bottom label last
-        UIView.animate(withDuration: 0.3, delay: 0.35) { [weak self] in
+        UIView.animate(withDuration: 0.25, delay: 0.25) { [weak self] in
             self?.bottomLabel.alpha = 1
         }
     }

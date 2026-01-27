@@ -9,6 +9,7 @@
 import UIKit
 import AVFoundation
 import CoreMedia
+import Combine
 
 /// A content provider that displays rear camera preview in PiP window.
 /// Uses AVCaptureVideoPreviewLayer directly embedded in contentView for
@@ -39,6 +40,11 @@ final class CameraProvider: NSObject, PiPContentProvider {
     private var interruptionObserver: NSObjectProtocol?
     private var interruptionEndedObserver: NSObjectProtocol?
     private var appDidBecomeActiveObserver: NSObjectProtocol?
+    
+    // Celebration
+    private var celebrationView: CelebrationView?
+    private var cancellables = Set<AnyCancellable>()
+    private var isCelebrating = false
     
     // MARK: - Initialization
     
@@ -88,6 +94,9 @@ final class CameraProvider: NSObject, PiPContentProvider {
         guard !isRunning else { return }
         isRunning = true
         
+        // Subscribe to away interval completion for celebration
+        setupCelebrationObserver()
+        
         // Check camera authorization
         switch AVCaptureDevice.authorizationStatus(for: .video) {
         case .authorized:
@@ -112,6 +121,10 @@ final class CameraProvider: NSObject, PiPContentProvider {
     func stop() {
         print("[CameraProvider] stop()")
         isRunning = false
+        
+        // Clean up celebration
+        cancellables.removeAll()
+        removeCelebration()
         
         // Remove notification observers
         if let observer = interruptionObserver {
@@ -278,5 +291,69 @@ final class CameraProvider: NSObject, PiPContentProvider {
     // Called when contentView's bounds change
     func updatePreviewLayerFrame() {
         previewLayer?.frame = contentView.bounds
+    }
+    
+    // MARK: - Celebration
+    
+    private func setupCelebrationObserver() {
+        print("[CameraProvider] Setting up celebration observer")
+        
+        // Subscribe to away interval completion
+        // Using dropFirst to ignore initial nil value
+        DisplayTimeTracker.shared.$lastCompletedAwayInterval
+            .dropFirst()  // Skip initial nil
+            .compactMap { $0 }
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] interval in
+                print("[CameraProvider] Received away interval: \(interval.duration) seconds")
+                self?.showCelebration(duration: interval.duration)
+            }
+            .store(in: &cancellables)
+        
+        print("[CameraProvider] Celebration observer setup complete")
+    }
+    
+    private func showCelebration(duration: TimeInterval) {
+        guard !isCelebrating else { return }
+        isCelebrating = true
+        
+        print("[CameraProvider] Showing celebration for \(Int(duration)) seconds away")
+        
+        // Hide camera preview layer during celebration
+        previewLayer?.isHidden = true
+        placeholderLabel.isHidden = true
+        
+        // Create and show celebration view
+        let celebration = CelebrationView(frame: contentView.bounds)
+        celebration.awayDuration = duration
+        celebration.onComplete = { [weak self] in
+            self?.removeCelebration()
+        }
+        
+        contentView.addSubview(celebration)
+        celebrationView = celebration
+        
+        // Force layout update
+        contentView.setNeedsLayout()
+        contentView.layoutIfNeeded()
+        
+        // Start the celebration animation
+        celebration.startCelebration()
+        
+        print("[CameraProvider] Celebration view added, frame: \(celebration.frame)")
+    }
+    
+    private func removeCelebration() {
+        celebrationView?.removeFromSuperview()
+        celebrationView = nil
+        isCelebrating = false
+        
+        // Show camera preview again
+        previewLayer?.isHidden = false
+        
+        // Restore frame rate (CameraProvider already uses 30fps)
+        DisplayTimeTracker.shared.clearLastAwayInterval()
+        
+        print("[CameraProvider] Celebration ended")
     }
 }
