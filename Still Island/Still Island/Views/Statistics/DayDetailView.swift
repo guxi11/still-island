@@ -7,6 +7,9 @@
 
 import SwiftUI
 
+// Note: Theme colors (statsOceanBlue, statsAmberGlow, statsJadeGreen) are defined
+// in CalendarStatsView.swift as a public Color extension
+
 /// Detailed view for a single day's usage
 struct DayDetailView: View {
     let date: Date
@@ -22,12 +25,12 @@ struct DayDetailView: View {
                 
                 HStack(spacing: 20) {
                     VStack(spacing: 2) {
-                        Text(formattedTotalDuration)
+                        Text(formattedDisplayDuration)
                             .font(.title2)
                             .fontWeight(.bold)
                             .fontDesign(.monospaced)
-                            .foregroundStyle(.blue)
-                        Text("总时长")
+                            .foregroundStyle(Color.statsOceanBlue)
+                        Text("展示时长")
                             .font(.caption2)
                             .foregroundStyle(.secondary)
                     }
@@ -38,8 +41,8 @@ struct DayDetailView: View {
                                 .font(.title2)
                                 .fontWeight(.bold)
                                 .fontDesign(.monospaced)
-                                .foregroundStyle(.purple)
-                            Text("离开时间")
+                                .foregroundStyle(Color.statsAmberGlow)
+                            Text("离开时长")
                                 .font(.caption2)
                                 .foregroundStyle(.secondary)
                         }
@@ -119,6 +122,11 @@ struct DayDetailView: View {
         sessions.reduce(0) { $0 + $1.duration }
     }
     
+    /// 展示时长 = 总时长 - 熄屏时长
+    private var displayDuration: TimeInterval {
+        totalDuration - totalAwayDuration
+    }
+    
     private var totalAwayDuration: TimeInterval {
         sessions.reduce(0) { $0 + $1.totalAwayDuration }
     }
@@ -130,8 +138,8 @@ struct DayDetailView: View {
         return formatter.string(from: date)
     }
     
-    private var formattedTotalDuration: String {
-        let totalSeconds = Int(totalDuration)
+    private var formattedDisplayDuration: String {
+        let totalSeconds = Int(displayDuration)
         let hours = totalSeconds / 3600
         let minutes = (totalSeconds % 3600) / 60
         let seconds = totalSeconds % 60
@@ -161,8 +169,8 @@ struct DayDetailView: View {
 struct TimelineLegendView: View {
     var body: some View {
         HStack(spacing: 16) {
-            LegendItem(color: .blue.opacity(0.7), label: "屏幕亮起")
-            LegendItem(color: .purple.opacity(0.6), label: "屏幕熄灭")
+            LegendItem(color: Color.statsOceanBlue.opacity(0.7), label: "屏幕亮起")
+            LegendItem(color: Color.statsAmberGlow.opacity(0.6), label: "屏幕熄灭")
         }
         .font(.caption)
     }
@@ -242,7 +250,7 @@ struct TimelineView: View {
                 if let intervalOffset = calculateIntervalOffset(session: session, interval: interval),
                    let intervalHeight = calculateIntervalHeight(interval: interval, sessionDuration: session.duration, blockHeight: blockHeight) {
                     RoundedRectangle(cornerRadius: 2)
-                        .fill(Color.purple.opacity(0.6))
+                        .fill(Color.statsAmberGlow.opacity(0.6))
                         .frame(width: blockWidth, height: intervalHeight)
                         .offset(y: intervalOffset)
                 }
@@ -273,8 +281,8 @@ struct TimelineView: View {
     
     private func providerColor(_ type: String) -> Color {
         switch type {
-        case "time": return .blue
-        case "timer": return .green
+        case "time": return Color.statsOceanBlue
+        case "timer": return Color.statsJadeGreen
         default: return .gray
         }
     }
@@ -318,7 +326,7 @@ struct SessionRowView: View {
                 if session.totalAwayDuration > 0 {
                     Text("离开 \(session.formattedAwayDuration)")
                         .font(.caption2)
-                        .foregroundStyle(.purple)
+                        .foregroundStyle(Color.statsAmberGlow)
                 }
             }
         }
@@ -347,8 +355,8 @@ struct SessionRowView: View {
     
     private var providerColor: Color {
         switch session.providerType {
-        case "time": return .blue
-        case "timer": return .green
+        case "time": return Color.statsOceanBlue
+        case "timer": return Color.statsJadeGreen
         default: return .gray
         }
     }

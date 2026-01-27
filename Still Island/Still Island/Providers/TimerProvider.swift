@@ -45,24 +45,41 @@ final class TimerProvider: PiPContentProvider {
         let container = UIView(frame: CGRect(origin: .zero, size: containerSize))
         container.backgroundColor = UIColor(red: 0.1, green: 0.15, blue: 0.1, alpha: 1.0) // Slightly green tint
         
-        // Create timer label
-        let label = UILabel(frame: CGRect(x: 0, y: 15, width: containerSize.width, height: 50))
+        // Create timer label with Auto Layout for proper centering
+        let label = UILabel()
         label.font = UIFont.monospacedDigitSystemFont(ofSize: 36, weight: .semibold)
         label.textColor = UIColor(red: 0.4, green: 1.0, blue: 0.4, alpha: 1.0) // Green color for timer
         label.textAlignment = .center
         label.text = "00:00:00"
         label.backgroundColor = .clear
+        label.translatesAutoresizingMaskIntoConstraints = false
         
-        // Create subtitle label
-        let subtitle = UILabel(frame: CGRect(x: 0, y: 65, width: containerSize.width, height: 20))
+        // Create subtitle label with Auto Layout
+        let subtitle = UILabel()
         subtitle.font = UIFont.systemFont(ofSize: 12, weight: .medium)
         subtitle.textColor = UIColor.white.withAlphaComponent(0.6)
         subtitle.textAlignment = .center
         subtitle.text = "计时中"
         subtitle.backgroundColor = .clear
+        subtitle.translatesAutoresizingMaskIntoConstraints = false
         
         container.addSubview(label)
         container.addSubview(subtitle)
+        
+        // Setup constraints for centering
+        NSLayoutConstraint.activate([
+            // Timer label: centered horizontally, positioned above center
+            label.centerXAnchor.constraint(equalTo: container.centerXAnchor),
+            label.centerYAnchor.constraint(equalTo: container.centerYAnchor, constant: -10),
+            label.leadingAnchor.constraint(greaterThanOrEqualTo: container.leadingAnchor, constant: 8),
+            label.trailingAnchor.constraint(lessThanOrEqualTo: container.trailingAnchor, constant: -8),
+            
+            // Subtitle: centered horizontally, below timer label
+            subtitle.centerXAnchor.constraint(equalTo: container.centerXAnchor),
+            subtitle.topAnchor.constraint(equalTo: label.bottomAnchor, constant: 4),
+            subtitle.leadingAnchor.constraint(greaterThanOrEqualTo: container.leadingAnchor, constant: 8),
+            subtitle.trailingAnchor.constraint(lessThanOrEqualTo: container.trailingAnchor, constant: -8)
+        ])
         
         self.contentView = container
         self.timerLabel = label

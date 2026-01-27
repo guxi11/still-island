@@ -107,6 +107,16 @@ final class CelebrationView: UIView {
         ])
     }
     
+    override func layoutSubviews() {
+        super.layoutSubviews()
+        
+        // Update emitter position when bounds change
+        if let emitter = emitterLayer {
+            emitter.emitterPosition = CGPoint(x: bounds.midX, y: -10)
+            emitter.emitterSize = CGSize(width: bounds.width * 1.5, height: 1)
+        }
+    }
+    
     // MARK: - Public Methods
     
     /// Start the celebration animation

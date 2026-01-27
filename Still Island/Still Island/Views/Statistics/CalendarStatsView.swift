@@ -7,6 +7,16 @@
 
 import SwiftUI
 
+// MARK: - Theme Colors (shared across Statistics views)
+extension Color {
+    /// 海洋蓝 - 代表专注时的屏幕亮起时间，如同平静的海面
+    static let statsOceanBlue = Color(red: 0.20, green: 0.55, blue: 0.82)
+    /// 珊瑚橙 - 代表休息时的熄屏时间，如同温暖的晚霞
+    static let statsAmberGlow = Color(red: 0.95, green: 0.45, blue: 0.35)
+    /// 翡翠绿 - 计时器类型
+    static let statsJadeGreen = Color(red: 0.25, green: 0.72, blue: 0.58)
+}
+
 /// Calendar view with monthly navigation and usage intensity indication
 struct CalendarStatsView: View {
     @Binding var selectedDate: Date
@@ -25,7 +35,7 @@ struct CalendarStatsView: View {
                     Button(action: previousMonth) {
                         Image(systemName: "chevron.left")
                             .font(.system(size: 16, weight: .medium))
-                            .foregroundStyle(.blue)
+                            .foregroundStyle(Color.statsOceanBlue)
                             .frame(width: 36, height: 36)
                     }
                     
@@ -39,7 +49,7 @@ struct CalendarStatsView: View {
                     Button(action: nextMonth) {
                         Image(systemName: "chevron.right")
                             .font(.system(size: 16, weight: .medium))
-                            .foregroundStyle(.blue)
+                            .foregroundStyle(Color.statsOceanBlue)
                             .frame(width: 36, height: 36)
                     }
                 }
@@ -65,8 +75,8 @@ struct CalendarStatsView: View {
                                 date: date,
                                 isSelected: calendar.isDate(date, inSameDayAs: selectedDate),
                                 isToday: calendar.isDateInToday(date),
-                                duration: tracker.totalDuration(for: date),
-                                maxDuration: maxDurationInMonth
+                                duration: displayDuration(for: date),
+                                maxDuration: maxDisplayDurationInMonth
                             )
                             .onTapGesture {
                                 selectedDate = date
@@ -119,12 +129,20 @@ struct CalendarStatsView: View {
         return days
     }
     
-    private var maxDurationInMonth: TimeInterval {
+    private var maxDisplayDurationInMonth: TimeInterval {
         let startOfMonth = calendar.date(from: calendar.dateComponents([.year, .month], from: currentMonth))!
         let endOfMonth = calendar.date(byAdding: .month, value: 1, to: startOfMonth)!
         
         let dailyTotals = tracker.dailyTotals(from: startOfMonth, to: endOfMonth)
-        return dailyTotals.map { $0.duration }.max() ?? 0
+        // 使用展示时长（总时长 - 熄屏时长）来计算最大值
+        return dailyTotals.map { $0.duration - $0.awayDuration }.max() ?? 0
+    }
+    
+    /// 计算指定日期的展示时长（减去熄屏时长）
+    private func displayDuration(for date: Date) -> TimeInterval {
+        let total = tracker.totalDuration(for: date)
+        let away = tracker.totalAwayDuration(for: date)
+        return total - away
     }
     
     // MARK: - Actions
@@ -171,18 +189,18 @@ struct DayCell: View {
         .aspectRatio(1, contentMode: .fill)
         .background(
             RoundedRectangle(cornerRadius: 10)
-                .fill(isSelected ? Color.blue.opacity(0.12) : Color.clear)
+                .fill(isSelected ? Color.statsOceanBlue.opacity(0.12) : Color.clear)
         )
         .overlay(
             RoundedRectangle(cornerRadius: 10)
-                .stroke(isToday ? Color.blue.opacity(0.5) : Color.clear, lineWidth: 1.5)
+                .stroke(isToday ? Color.statsOceanBlue.opacity(0.5) : Color.clear, lineWidth: 1.5)
         )
     }
     
     private var dotColor: Color {
         if duration == 0 { return .clear }
         let intensity = maxDuration > 0 ? min(duration / maxDuration, 1.0) : 0
-        return Color.blue.opacity(0.4 + (intensity * 0.6))
+        return Color.statsOceanBlue.opacity(0.4 + (intensity * 0.6))
     }
     
     private var dotSize: CGFloat {
@@ -192,7 +210,7 @@ struct DayCell: View {
     }
     
     private var textColor: Color {
-        isToday ? .blue : .primary
+        isToday ? Color.statsOceanBlue : .primary
     }
 }
 

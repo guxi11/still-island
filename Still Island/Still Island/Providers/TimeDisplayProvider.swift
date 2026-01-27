@@ -47,15 +47,24 @@ final class TimeDisplayProvider: PiPContentProvider {
         let container = UIView(frame: CGRect(origin: .zero, size: containerSize))
         container.backgroundColor = UIColor(red: 0.1, green: 0.1, blue: 0.15, alpha: 1.0)
         
-        // Create time label with manual frame layout (Auto Layout doesn't work well off-screen)
-        let label = UILabel(frame: container.bounds)
+        // Create time label with Auto Layout for proper centering
+        let label = UILabel()
         label.font = UIFont.monospacedDigitSystemFont(ofSize: 36, weight: .semibold)
         label.textColor = .white
         label.textAlignment = .center
         label.text = dateFormatter.string(from: Date())
         label.backgroundColor = .clear
+        label.translatesAutoresizingMaskIntoConstraints = false
         
         container.addSubview(label)
+        
+        // Setup constraints for centering
+        NSLayoutConstraint.activate([
+            label.centerXAnchor.constraint(equalTo: container.centerXAnchor),
+            label.centerYAnchor.constraint(equalTo: container.centerYAnchor),
+            label.leadingAnchor.constraint(greaterThanOrEqualTo: container.leadingAnchor, constant: 8),
+            label.trailingAnchor.constraint(lessThanOrEqualTo: container.trailingAnchor, constant: -8)
+        ])
         
         self.contentView = container
         self.timeLabel = label

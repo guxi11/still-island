@@ -51,19 +51,27 @@ final class CameraProvider: NSObject, PiPContentProvider {
     override init() {
         // Create container view
         let containerSize = CGSize(width: 200, height: 100)
-        let container = UIView(frame: CGRect(origin: .zero, size: containerSize))
+        let container = CameraContainerView(frame: CGRect(origin: .zero, size: containerSize))
         container.backgroundColor = UIColor.black
         container.clipsToBounds = true
         
         // Create placeholder label
-        let label = UILabel(frame: container.bounds)
+        let label = UILabel()
         label.font = UIFont.systemFont(ofSize: 14, weight: .medium)
         label.textColor = .white.withAlphaComponent(0.6)
         label.textAlignment = .center
         label.text = "实景加载中..."
         label.backgroundColor = .clear
-        label.autoresizingMask = [.flexibleWidth, .flexibleHeight]
+        label.translatesAutoresizingMaskIntoConstraints = false
         container.addSubview(label)
+        
+        // Center the label
+        NSLayoutConstraint.activate([
+            label.centerXAnchor.constraint(equalTo: container.centerXAnchor),
+            label.centerYAnchor.constraint(equalTo: container.centerYAnchor),
+            label.leadingAnchor.constraint(greaterThanOrEqualTo: container.leadingAnchor, constant: 8),
+            label.trailingAnchor.constraint(lessThanOrEqualTo: container.trailingAnchor, constant: -8)
+        ])
         
         self.contentView = container
         self.placeholderLabel = label
@@ -293,6 +301,11 @@ final class CameraProvider: NSObject, PiPContentProvider {
         previewLayer?.frame = contentView.bounds
     }
     
+    /// Returns the preview layer for external frame updates
+    var currentPreviewLayer: AVCaptureVideoPreviewLayer? {
+        previewLayer
+    }
+    
     // MARK: - Celebration
     
     private func setupCelebrationObserver() {
@@ -355,5 +368,24 @@ final class CameraProvider: NSObject, PiPContentProvider {
         DisplayTimeTracker.shared.clearLastAwayInterval()
         
         print("[CameraProvider] Celebration ended")
+    }
+}
+
+// MARK: - CameraContainerView
+
+/// A custom UIView that automatically updates its preview layer frame when bounds change.
+private class CameraContainerView: UIView {
+    
+    override func layoutSubviews() {
+        super.layoutSubviews()
+        
+        // Update all CALayer sublayers that are AVCaptureVideoPreviewLayer
+        if let sublayers = layer.sublayers {
+            for sublayer in sublayers {
+                if let previewLayer = sublayer as? AVCaptureVideoPreviewLayer {
+                    previewLayer.frame = bounds
+                }
+            }
+        }
     }
 }

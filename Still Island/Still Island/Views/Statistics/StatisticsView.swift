@@ -9,6 +9,9 @@ import SwiftUI
 import SwiftData
 import Charts
 
+// Note: Theme colors (statsOceanBlue, statsAmberGlow, statsJadeGreen) are defined
+// in CalendarStatsView.swift as a public Color extension
+
 /// Main statistics view with bar chart header - iOS Screen Time style
 struct StatisticsView: View {
     @ObservedObject private var tracker = DisplayTimeTracker.shared
@@ -44,7 +47,7 @@ struct StatisticsView: View {
                         .foregroundStyle(.primary)
                     HStack(spacing: 6) {
                         RoundedRectangle(cornerRadius: 2)
-                            .fill(Color.mint)
+                            .fill(Color.statsOceanBlue)
                             .frame(width: 10, height: 10)
                         Text("展示")
                             .font(.system(size: 13))
@@ -59,7 +62,7 @@ struct StatisticsView: View {
                         .foregroundStyle(.secondary)
                     HStack(spacing: 6) {
                         RoundedRectangle(cornerRadius: 2)
-                            .fill(Color.pink)
+                            .fill(Color.statsAmberGlow)
                             .frame(width: 10, height: 10)
                         Text("离开")
                             .font(.system(size: 13))
@@ -74,21 +77,21 @@ struct StatisticsView: View {
             
             // Stacked bar chart - shows both display and away time
             Chart(chartData) { item in
-                // Display time (mint green)
+                // Display time (ocean blue - 专注时间)
                 BarMark(
                     x: .value("日期", item.date, unit: .day),
                     y: .value("时长", item.displayMinutes)
                 )
-                .foregroundStyle(item.isSelected ? Color.mint : Color.mint.opacity(0.5))
-                .cornerRadius(3)
+                                .foregroundStyle(item.isSelected ? Color.statsOceanBlue : Color.statsOceanBlue.opacity(0.45))
+                .cornerRadius(4)
                 
-                // Away time (pink) - stacked on top
+                // Away time (amber glow - 休息时间) - stacked on top
                 BarMark(
                     x: .value("日期", item.date, unit: .day),
                     y: .value("时长", item.awayMinutes)
                 )
-                .foregroundStyle(item.isSelected ? Color.pink : Color.pink.opacity(0.4))
-                .cornerRadius(3)
+                                .foregroundStyle(item.isSelected ? Color.statsAmberGlow : Color.statsAmberGlow.opacity(0.40))
+                .cornerRadius(4)
             }
             .chartXAxis {
                 AxisMarks(values: .stride(by: .day, count: 1)) { value in
@@ -158,7 +161,7 @@ struct StatisticsView: View {
                 statRow(
                     title: "展示时间",
                     duration: selectedDayDisplayDuration,
-                    color: .mint
+                    color: .statsOceanBlue
                 )
                 
                 Divider()
@@ -167,7 +170,7 @@ struct StatisticsView: View {
                 statRow(
                     title: "离开时间",
                     duration: selectedDayAwayDuration,
-                    color: .pink
+                    color: .statsAmberGlow
                 )
             }
             .background(Color(.secondarySystemGroupedBackground))
@@ -181,7 +184,7 @@ struct StatisticsView: View {
                 HStack {
                     Image(systemName: "calendar")
                         .font(.system(size: 15))
-                        .foregroundStyle(.mint)
+                        .foregroundStyle(Color.statsOceanBlue)
                     Text("查看日历")
                         .font(.system(size: 15))
                         .foregroundStyle(.primary)
