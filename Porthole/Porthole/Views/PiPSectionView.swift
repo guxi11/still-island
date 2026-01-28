@@ -42,12 +42,18 @@ struct PiPSectionView: View {
         VStack(spacing: 20) {
             // Top empty area with guide text
             ZStack {
-                // Guide text - only show when PiP is not running
-                if !isPiPRunning {
-                    Text("点击卡片展示舷窗")
+                // Show preparing hint when PiP is preparing
+                if pipManager.isPreparingPiP {
+                    Text("准备中...")
+                        .font(.system(size: 18, weight: .medium))
+                        .foregroundStyle(.secondary.opacity(0.7))
+                } else if !isPiPRunning {
+                    // Show default hint when no PiP is running
+                    Text("点击卡片打开舷窗")
                         .font(.system(size: 18, weight: .medium))
                         .foregroundStyle(.secondary.opacity(0.5))
                 }
+                // When PiP is active, show nothing
             }
             .frame(height: 120)
 

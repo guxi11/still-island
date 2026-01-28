@@ -100,7 +100,7 @@ struct SummaryCard: View {
                     .font(.system(size: 22, weight: .bold, design: .rounded))
                     .foregroundStyle(.primary)
 
-                Text("亮屏")
+                Text("使用中")
                     .font(.system(size: 11))
                     .foregroundStyle(.secondary)
             }
@@ -121,7 +121,7 @@ struct SummaryCard: View {
                     .font(.system(size: 22, weight: .bold, design: .rounded))
                     .foregroundStyle(.primary)
 
-                Text("熄屏")
+                Text("休息中")
                     .font(.system(size: 11))
                     .foregroundStyle(.secondary)
             }

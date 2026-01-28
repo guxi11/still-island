@@ -11,7 +11,7 @@ import SwiftUI
 extension Color {
     /// 海洋蓝 - 代表专注时的屏幕亮起时间，如同平静的海面
     static let statsOceanBlue = Color(red: 0.20, green: 0.55, blue: 0.82)
-    /// 珊瑚橙 - 代表休息时的熄屏时间，如同温暖的晚霞
+    /// 珊瑚橙 - 代表休息时间，如同温暖的晚霞
     static let statsAmberGlow = Color(red: 0.95, green: 0.45, blue: 0.35)
     /// 翡翠绿 - 计时器类型
     static let statsJadeGreen = Color(red: 0.25, green: 0.72, blue: 0.58)

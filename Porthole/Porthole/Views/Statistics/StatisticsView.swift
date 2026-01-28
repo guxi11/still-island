@@ -49,7 +49,7 @@ struct StatisticsView: View {
                         RoundedRectangle(cornerRadius: 2)
                             .fill(Color.statsOceanBlue)
                             .frame(width: 10, height: 10)
-                        Text("展示")
+                        Text("预览生活")
                             .font(.system(size: 13))
                             .foregroundStyle(.secondary)
                     }
@@ -64,7 +64,7 @@ struct StatisticsView: View {
                         RoundedRectangle(cornerRadius: 2)
                             .fill(Color.statsAmberGlow)
                             .frame(width: 10, height: 10)
-                        Text("离开")
+                        Text("回归生活")
                             .font(.system(size: 13))
                             .foregroundStyle(.secondary)
                     }
@@ -77,12 +77,12 @@ struct StatisticsView: View {
             
             // Stacked bar chart - shows both display and away time
             Chart(chartData) { item in
-                // Display time (ocean blue - 专注时间)
+                // Display time (ocean blue - 预览生活)
                 BarMark(
                     x: .value("日期", item.date, unit: .day),
                     y: .value("时长", item.displayMinutes)
                 )
-                                .foregroundStyle(item.isSelected ? Color.statsOceanBlue : Color.statsOceanBlue.opacity(0.45))
+                .foregroundStyle(item.isSelected ? Color.statsOceanBlue : Color.statsOceanBlue.opacity(0.45))
                 .cornerRadius(4)
                 
                 // Away time (amber glow - 休息时间) - stacked on top
@@ -172,7 +172,7 @@ struct StatisticsView: View {
             // Stats for selected date
             VStack(spacing: 0) {
                 statRow(
-                    title: "展示时间",
+                    title: "预览生活",
                     duration: selectedDayDisplayDuration,
                     color: .statsOceanBlue
                 )
@@ -181,7 +181,7 @@ struct StatisticsView: View {
                     .padding(.leading, 20)
                 
                 statRow(
-                    title: "离开时间",
+                    title: "回归生活",
                     duration: selectedDayAwayDuration,
                     color: .statsAmberGlow
                 )

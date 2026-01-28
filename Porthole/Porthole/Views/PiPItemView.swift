@@ -63,7 +63,7 @@ struct PiPItemView: View {
                     .opacity(0.01)
                 }
             }
-            .frame(height: 110)
+            .frame(height: 100)
             .clipShape(RoundedRectangle(cornerRadius: 20))
             .shadow(color: .black.opacity(showSilhouette ? 0.05 : 0.08), radius: showSilhouette ? 4 : 8, x: 0, y: showSilhouette ? 2 : 4)
             .scaleEffect(isPressed ? 0.96 : 1.0)
@@ -121,28 +121,19 @@ struct PiPItemView: View {
     /// Silhouette view when PiP is active - tap to close
     private var silhouetteView: some View {
         ZStack {
-            // Frosted glass background
+            // Frosted glass background with more noticeable gray tint
             RoundedRectangle(cornerRadius: 20)
                 .fill(.ultraThinMaterial)
+                .overlay(
+                    RoundedRectangle(cornerRadius: 20)
+                        .fill(Color(.systemGray5).opacity(0.4))
+                        .blendMode(.multiply)
+                )
 
-            // Subtle inner content
-            VStack(spacing: 12) {
-                // Icon in a circle
-                ZStack {
-                    Circle()
-                        .stroke(Color.primary.opacity(0.15), lineWidth: 1.5)
-                        .frame(width: 40, height: 40)
-
-                    Image(systemName: providerType.iconName)
-                        .font(.system(size: 16, weight: .medium))
-                        .foregroundStyle(.secondary)
-                }
-
-                // "Tap to close" hint
-                Text("轻触关闭")
-                    .font(.system(size: 11, weight: .medium))
-                    .foregroundStyle(.tertiary)
-            }
+            // Subtle inner content - only text centered
+            Text("轻触关闭")
+                .font(.system(size: 11, weight: .medium))
+                .foregroundStyle(.tertiary)
 
             // Active indicator - pulsing dot
             VStack {
