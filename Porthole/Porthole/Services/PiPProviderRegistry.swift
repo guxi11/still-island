@@ -13,6 +13,7 @@ enum PiPProviderType: String, CaseIterable, Identifiable {
     case time = "time"
     case timer = "timer"
     case camera = "camera"
+    case cat = "cat"
     
     var id: String { rawValue }
     
@@ -21,6 +22,7 @@ enum PiPProviderType: String, CaseIterable, Identifiable {
         case .time: return TimeDisplayProvider.displayName
         case .timer: return TimerProvider.displayName
         case .camera: return CameraProvider.displayName
+        case .cat: return CatCompanionProvider.displayName
         }
     }
     
@@ -29,6 +31,7 @@ enum PiPProviderType: String, CaseIterable, Identifiable {
         case .time: return TimeDisplayProvider.iconName
         case .timer: return TimerProvider.iconName
         case .camera: return CameraProvider.iconName
+        case .cat: return CatCompanionProvider.iconName
         }
     }
     
@@ -41,6 +44,8 @@ enum PiPProviderType: String, CaseIterable, Identifiable {
             return TimerProvider()
         case .camera:
             return CameraProvider()
+        case .cat:
+            return CatCompanionProvider()
         }
     }
 }

@@ -112,7 +112,7 @@ struct PiPItemView: View {
             // Frosted glass background
             RoundedRectangle(cornerRadius: 20)
                 .fill(.ultraThinMaterial)
-            
+
             // Subtle inner content
             VStack(spacing: 12) {
                 // Icon in a circle
@@ -120,18 +120,18 @@ struct PiPItemView: View {
                     Circle()
                         .stroke(Color.primary.opacity(0.15), lineWidth: 1.5)
                         .frame(width: 40, height: 40)
-                    
+
                     Image(systemName: providerType.iconName)
                         .font(.system(size: 16, weight: .medium))
                         .foregroundStyle(.secondary)
                 }
-                
+
                 // "Tap to close" hint
                 Text("轻触关闭")
                     .font(.system(size: 11, weight: .medium))
                     .foregroundStyle(.tertiary)
             }
-            
+
             // Active indicator - pulsing dot
             VStack {
                 HStack {

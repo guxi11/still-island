@@ -25,9 +25,8 @@ final class TimerProvider: PiPContentProvider {
     let preferredFrameRate: Int = 10
     
     // MARK: - Private Properties
-    
+
     private let timerLabel: UILabel
-    private let subtitleLabel: UILabel
     private var timer: Timer?
     private var elapsedSeconds: TimeInterval = 0
     private var isPaused = false
@@ -44,7 +43,7 @@ final class TimerProvider: PiPContentProvider {
         let containerSize = CGSize(width: 200, height: 100)
         let container = UIView(frame: CGRect(origin: .zero, size: containerSize))
         container.backgroundColor = UIColor(red: 0.1, green: 0.15, blue: 0.1, alpha: 1.0) // Slightly green tint
-        
+
         // Create timer label with Auto Layout for proper centering
         let label = UILabel()
         label.font = UIFont.monospacedDigitSystemFont(ofSize: 36, weight: .semibold)
@@ -53,42 +52,25 @@ final class TimerProvider: PiPContentProvider {
         label.text = "00:00:00"
         label.backgroundColor = .clear
         label.translatesAutoresizingMaskIntoConstraints = false
-        
-        // Create subtitle label with Auto Layout
-        let subtitle = UILabel()
-        subtitle.font = UIFont.systemFont(ofSize: 12, weight: .medium)
-        subtitle.textColor = UIColor.white.withAlphaComponent(0.6)
-        subtitle.textAlignment = .center
-        subtitle.text = "计时中"
-        subtitle.backgroundColor = .clear
-        subtitle.translatesAutoresizingMaskIntoConstraints = false
-        
+
         container.addSubview(label)
-        container.addSubview(subtitle)
-        
+
         // Setup constraints for centering
         NSLayoutConstraint.activate([
-            // Timer label: centered horizontally, positioned above center
+            // Timer label: centered both horizontally and vertically
             label.centerXAnchor.constraint(equalTo: container.centerXAnchor),
-            label.centerYAnchor.constraint(equalTo: container.centerYAnchor, constant: -10),
+            label.centerYAnchor.constraint(equalTo: container.centerYAnchor),
             label.leadingAnchor.constraint(greaterThanOrEqualTo: container.leadingAnchor, constant: 8),
-            label.trailingAnchor.constraint(lessThanOrEqualTo: container.trailingAnchor, constant: -8),
-            
-            // Subtitle: centered horizontally, below timer label
-            subtitle.centerXAnchor.constraint(equalTo: container.centerXAnchor),
-            subtitle.topAnchor.constraint(equalTo: label.bottomAnchor, constant: 4),
-            subtitle.leadingAnchor.constraint(greaterThanOrEqualTo: container.leadingAnchor, constant: 8),
-            subtitle.trailingAnchor.constraint(lessThanOrEqualTo: container.trailingAnchor, constant: -8)
+            label.trailingAnchor.constraint(lessThanOrEqualTo: container.trailingAnchor, constant: -8)
         ])
-        
+
         self.contentView = container
         self.timerLabel = label
-        self.subtitleLabel = subtitle
-        
+
         // Force layout
         container.setNeedsLayout()
         container.layoutIfNeeded()
-        
+
         print("[TimerProvider] Initialized with view size: \(container.bounds.size)")
     }
     
@@ -96,18 +78,17 @@ final class TimerProvider: PiPContentProvider {
     
     func start() {
         print("[TimerProvider] start() - isPaused: \(isPaused)")
-        
+
         // If resuming from pause, just continue
         // If fresh start, reset elapsed time
         if !isPaused {
             elapsedSeconds = 0
         }
         isPaused = false
-        
+
         // Update display immediately
         updateDisplay()
-        updateSubtitle()
-        
+
         // Start timer
         timer?.invalidate()
         timer = Timer.scheduledTimer(withTimeInterval: 1.0, repeats: true) { [weak self] _ in
@@ -115,12 +96,12 @@ final class TimerProvider: PiPContentProvider {
             self.elapsedSeconds += 1
             self.updateDisplay()
         }
-        
+
         // Add to common run loop mode for background operation
         if let timer = timer {
             RunLoop.main.add(timer, forMode: .common)
         }
-        
+
         // Subscribe to away interval completion for celebration
         setupCelebrationObserver()
     }
@@ -130,7 +111,6 @@ final class TimerProvider: PiPContentProvider {
         isPaused = true
         timer?.invalidate()
         timer = nil
-        updateSubtitle()
         cancellables.removeAll()
         removeCelebration()
     }
@@ -165,14 +145,7 @@ final class TimerProvider: PiPContentProvider {
         contentView.setNeedsDisplay()
         timerLabel.setNeedsDisplay()
     }
-    
-    private func updateSubtitle() {
-        subtitleLabel.text = isPaused ? "已暂停" : "计时中"
-        subtitleLabel.textColor = isPaused 
-            ? UIColor.orange.withAlphaComponent(0.8) 
-            : UIColor.white.withAlphaComponent(0.6)
-    }
-    
+
     // MARK: - Celebration
     
     private func setupCelebrationObserver() {
@@ -201,11 +174,10 @@ final class TimerProvider: PiPContentProvider {
         
         // Increase frame rate for smooth animation
         PiPManager.shared.setFrameRate(30)
-        
-        // Hide timer labels
+
+        // Hide timer label
         timerLabel.isHidden = true
-        subtitleLabel.isHidden = true
-        
+
         // Create and show celebration view
         let celebration = CelebrationView(frame: contentView.bounds)
         celebration.awayDuration = duration
@@ -230,15 +202,14 @@ final class TimerProvider: PiPContentProvider {
         celebrationView?.removeFromSuperview()
         celebrationView = nil
         isCelebrating = false
-        
-        // Show timer labels again
+
+        // Show timer label again
         timerLabel.isHidden = false
-        subtitleLabel.isHidden = false
-        
+
         // Restore normal frame rate
         PiPManager.shared.setFrameRate(preferredFrameRate)
         DisplayTimeTracker.shared.clearLastAwayInterval()
-        
+
         print("[TimerProvider] Celebration ended")
     }
 }
