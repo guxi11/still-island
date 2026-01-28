@@ -15,18 +15,22 @@ struct PortholeApp: App {
     init() {
         let schema = Schema([
             DisplaySession.self,
+            CardInstance.self,
         ])
         let modelConfiguration = ModelConfiguration(schema: schema, isStoredInMemoryOnly: false)
 
         do {
             let container = try ModelContainer(for: schema, configurations: [modelConfiguration])
             self.sharedModelContainer = container
-            
+
             // Configure DisplayTimeTracker with the model container
             Task { @MainActor in
                 DisplayTimeTracker.shared.configure(with: container)
                 // Setup screen state observers for away time tracking
                 DisplayTimeTracker.shared.setupScreenStateObservers()
+
+                // Configure CardManager
+                CardManager.shared.configure(with: container)
             }
         } catch {
             fatalError("Could not create ModelContainer: \(error)")

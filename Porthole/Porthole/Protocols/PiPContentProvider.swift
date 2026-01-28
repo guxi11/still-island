@@ -16,25 +16,25 @@ protocol PiPContentProvider: AnyObject {
     /// Unique identifier for this provider type (e.g., "time", "timer")
     /// Used for tracking and statistics.
     static var providerType: String { get }
-    
+
     /// Display name shown in the UI
     static var displayName: String { get }
-    
+
     /// SF Symbol name for the provider icon
     static var iconName: String { get }
-    
+
     /// The view that contains the content to be displayed in PiP.
     /// This view will be captured and converted to video frames.
     var contentView: UIView { get }
-    
+
     /// The preferred frame rate for this content type.
     /// Lower frame rates save battery. Recommended: 1-10 FPS for mostly static content.
     var preferredFrameRate: Int { get }
-    
+
     /// Called when the PiP starts displaying this content.
     /// Use this to start any timers or updates needed for the content.
     func start()
-    
+
     /// Called when the PiP stops or switches to different content.
     /// Use this to clean up resources, stop timers, etc.
     func stop()
@@ -50,7 +50,7 @@ protocol DirectVideoProvider: PiPContentProvider {
     /// Whether this provider outputs video frames directly.
     /// When true, PiPManager will use direct frame pushing instead of UIView capture.
     var providesDirectVideoOutput: Bool { get }
-    
+
     /// Set the display layer to receive video frames.
     /// Called by PiPManager before start() to provide the output destination.
     func setOutputLayer(_ layer: AVSampleBufferDisplayLayer)

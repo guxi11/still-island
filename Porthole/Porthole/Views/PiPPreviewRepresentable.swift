@@ -7,6 +7,7 @@
 
 import SwiftUI
 import UIKit
+import AVFoundation
 
 /// SwiftUI representable for displaying a live preview of PiP content
 struct PiPPreviewRepresentable: UIViewRepresentable {
@@ -73,12 +74,14 @@ struct PiPPreviewRepresentable: UIViewRepresentable {
 /// A simpler static preview that doesn't run the provider
 struct PiPStaticPreview: View {
     let providerType: PiPProviderType
-    
+    /// Optional video URL for video cards to display thumbnail
+    var videoURL: URL?
+
     var body: some View {
         ZStack {
             // Background matching provider style
             backgroundColor
-            
+
             // Content preview
             switch providerType {
             case .camera:
@@ -92,6 +95,15 @@ struct PiPStaticPreview: View {
                 // Show cat emoji on white background
                 Text("🐱")
                     .font(.system(size: 50))
+            case .video:
+                // Video shows thumbnail if available, otherwise play icon
+                if let url = videoURL {
+                    VideoThumbnailView(videoURL: url)
+                } else {
+                    Image(systemName: "play.rectangle.fill")
+                        .font(.system(size: 28, weight: .medium))
+                        .foregroundStyle(.white.opacity(0.8))
+                }
             default:
                 Text(previewText)
                     .font(.system(size: 32, weight: .semibold, design: .monospaced))
@@ -99,7 +111,7 @@ struct PiPStaticPreview: View {
             }
         }
     }
-    
+
     private var backgroundColor: Color {
         switch providerType {
         case .time:
@@ -110,9 +122,11 @@ struct PiPStaticPreview: View {
             return Color(red: 0.15, green: 0.12, blue: 0.18)
         case .cat:
             return .white
+        case .video:
+            return Color(red: 0.12, green: 0.1, blue: 0.18)
         }
     }
-    
+
     private var foregroundColor: Color {
         switch providerType {
         case .time:
@@ -123,9 +137,11 @@ struct PiPStaticPreview: View {
             return .white
         case .cat:
             return Color(red: 0.95, green: 0.6, blue: 0.3)
+        case .video:
+            return .white
         }
     }
-    
+
     private var previewText: String {
         switch providerType {
         case .time:
@@ -138,6 +154,57 @@ struct PiPStaticPreview: View {
             return ""
         case .cat:
             return ""
+        case .video:
+            return ""
+        }
+    }
+}
+
+/// View for displaying video thumbnail
+struct VideoThumbnailView: View {
+    let videoURL: URL
+    @State private var thumbnail: UIImage?
+
+    var body: some View {
+        GeometryReader { geometry in
+            if let image = thumbnail {
+                Image(uiImage: image)
+                    .resizable()
+                    .aspectRatio(contentMode: .fill)
+                    .frame(width: geometry.size.width, height: geometry.size.height)
+                    .clipped()
+            } else {
+                // Fallback while loading
+                Color(red: 0.12, green: 0.1, blue: 0.18)
+                    .overlay(
+                        ProgressView()
+                            .scaleEffect(0.7)
+                    )
+            }
+        }
+        .onAppear {
+            loadThumbnail()
+        }
+        .onChange(of: videoURL) { _, _ in
+            loadThumbnail()
+        }
+    }
+
+    private func loadThumbnail() {
+        Task {
+            let asset = AVAsset(url: videoURL)
+            let imageGenerator = AVAssetImageGenerator(asset: asset)
+            imageGenerator.appliesPreferredTrackTransform = true
+            imageGenerator.maximumSize = CGSize(width: 400, height: 400)
+
+            do {
+                let cgImage = try await imageGenerator.image(at: .zero).image
+                await MainActor.run {
+                    thumbnail = UIImage(cgImage: cgImage)
+                }
+            } catch {
+                print("[VideoThumbnailView] Failed to generate thumbnail: \(error)")
+            }
         }
     }
 }

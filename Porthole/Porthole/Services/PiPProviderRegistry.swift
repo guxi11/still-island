@@ -14,27 +14,54 @@ enum PiPProviderType: String, CaseIterable, Identifiable {
     case timer = "timer"
     case camera = "camera"
     case cat = "cat"
-    
+    case video = "video"
+
     var id: String { rawValue }
-    
+
     var displayName: String {
         switch self {
         case .time: return TimeDisplayProvider.displayName
         case .timer: return TimerProvider.displayName
         case .camera: return CameraProvider.displayName
         case .cat: return CatCompanionProvider.displayName
+        case .video: return VideoLoopProvider.displayName
         }
     }
-    
+
     var iconName: String {
         switch self {
         case .time: return TimeDisplayProvider.iconName
         case .timer: return TimerProvider.iconName
         case .camera: return CameraProvider.iconName
         case .cat: return CatCompanionProvider.iconName
+        case .video: return VideoLoopProvider.iconName
         }
     }
-    
+
+    /// Whether the provider has a light background (for text color adjustment)
+    var hasLightBackground: Bool {
+        switch self {
+        case .cat: return true
+        default: return false
+        }
+    }
+
+    /// Whether this provider type supports custom content (like video selection)
+    var supportsCustomContent: Bool {
+        switch self {
+        case .video: return true
+        default: return false
+        }
+    }
+
+    /// Whether multiple instances of this provider type are allowed on the home page
+    var allowsMultipleInstances: Bool {
+        switch self {
+        case .video: return true
+        case .time, .timer, .camera, .cat: return false
+        }
+    }
+
     /// Creates a new instance of the provider
     func createProvider() -> PiPContentProvider {
         switch self {
@@ -46,6 +73,30 @@ enum PiPProviderType: String, CaseIterable, Identifiable {
             return CameraProvider()
         case .cat:
             return CatCompanionProvider()
+        case .video:
+            return VideoLoopProvider()
+        }
+    }
+
+    /// Creates a new instance of the provider with optional configuration
+    func createProvider(with configuration: Data?) -> PiPContentProvider {
+        switch self {
+        case .time:
+            return TimeDisplayProvider()
+        case .timer:
+            return TimerProvider()
+        case .camera:
+            return CameraProvider()
+        case .cat:
+            return CatCompanionProvider()
+        case .video:
+            let provider = VideoLoopProvider()
+            // Load video URL from configuration if provided
+            if let config = VideoCardConfiguration.decode(from: configuration),
+               let url = config.videoURL {
+                provider.setVideoURL(url)
+            }
+            return provider
         }
     }
 }

@@ -7,7 +7,7 @@
 
 import SwiftUI
 
-// Note: Theme colors (statsOceanBlue, statsAmberGlow, statsJadeGreen) are defined
+// Note: Theme colors (statsOceanBlue, statsAmberGlow, statsJadeGreen, etc.) are defined
 // in CalendarStatsView.swift as a public Color extension
 
 /// Detailed view for a single day's usage
@@ -15,93 +15,37 @@ struct DayDetailView: View {
     let date: Date
     @ObservedObject private var tracker = DisplayTimeTracker.shared
     @Environment(\.dismiss) private var dismiss
-    
+
     var body: some View {
-        VStack(spacing: 0) {
-            // Header with date and total
-            VStack(spacing: 8) {
-                Text(formattedDate)
-                    .font(.headline)
-                
-                HStack(spacing: 20) {
-                    VStack(spacing: 2) {
-                        Text(formattedDisplayDuration)
-                            .font(.title2)
-                            .fontWeight(.bold)
-                            .fontDesign(.monospaced)
-                            .foregroundStyle(Color.statsOceanBlue)
-                        Text("展示时长")
-                            .font(.caption2)
-                            .foregroundStyle(.secondary)
-                    }
-                    
-                    if totalAwayDuration > 0 {
-                        VStack(spacing: 2) {
-                            Text(formattedAwayDuration)
-                                .font(.title2)
-                                .fontWeight(.bold)
-                                .fontDesign(.monospaced)
-                                .foregroundStyle(Color.statsAmberGlow)
-                            Text("离开时长")
-                                .font(.caption2)
-                                .foregroundStyle(.secondary)
+        ScrollView {
+            VStack(spacing: 16) {
+                // Summary card
+                SummaryCard(
+                    displayDuration: displayDuration,
+                    awayDuration: totalAwayDuration
+                )
+                .padding(.horizontal, 16)
+                .padding(.top, 8)
+
+                if sessions.isEmpty {
+                    // Empty state
+                    EmptyStateView()
+                        .frame(minHeight: 200)
+                } else {
+                    // Compact session list
+                    VStack(spacing: 8) {
+                        ForEach(sessions, id: \.id) { session in
+                            CompactSessionRow(session: session)
                         }
                     }
+                    .padding(.horizontal, 16)
                 }
-            }
-            .padding()
-            .frame(maxWidth: .infinity)
-            .background(Color(.secondarySystemGroupedBackground))
-            
-            if sessions.isEmpty {
-                // Empty state
-                VStack(spacing: 16) {
-                    Spacer()
-                    
-                    Image(systemName: "moon.zzz.fill")
-                        .font(.system(size: 50))
-                        .foregroundStyle(.secondary)
-                    
-                    Text("当日无使用记录")
-                        .font(.headline)
-                        .foregroundStyle(.secondary)
-                    
-                    Spacer()
-                }
-            } else {
-                // Timeline visualization
-                ScrollView {
-                    VStack(spacing: 0) {
-                        // Hour markers and sessions
-                        TimelineView(sessions: sessions)
-                            .padding()
-                        
-                        // Legend
-                        TimelineLegendView()
-                            .padding(.horizontal)
-                        
-                        Divider()
-                            .padding(.horizontal)
-                            .padding(.top, 8)
-                        
-                        // Session list
-                        VStack(alignment: .leading, spacing: 12) {
-                            Text("详细记录")
-                                .font(.headline)
-                                .padding(.horizontal)
-                                .padding(.top)
-                            
-                            ForEach(sessions, id: \.id) { session in
-                                SessionRowView(session: session)
-                                    .padding(.horizontal)
-                            }
-                        }
-                        .padding(.bottom)
-                    }
-                }
+
+                Spacer(minLength: 20)
             }
         }
-        .navigationTitle("日详情")
+        .background(Color(.systemGroupedBackground))
+        .navigationTitle(formattedDate)
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
             ToolbarItem(placement: .confirmationAction) {
@@ -111,262 +55,193 @@ struct DayDetailView: View {
             }
         }
     }
-    
+
     // MARK: - Computed Properties
-    
+
     private var sessions: [DisplaySession] {
         tracker.sessions(for: date)
     }
-    
+
     private var totalDuration: TimeInterval {
         sessions.reduce(0) { $0 + $1.duration }
     }
-    
-    /// 展示时长 = 总时长 - 熄屏时长
+
     private var displayDuration: TimeInterval {
         totalDuration - totalAwayDuration
     }
-    
+
     private var totalAwayDuration: TimeInterval {
         sessions.reduce(0) { $0 + $1.totalAwayDuration }
     }
-    
+
     private var formattedDate: String {
         let formatter = DateFormatter()
-        formatter.dateFormat = "yyyy年M月d日 EEEE"
+        formatter.dateFormat = "M月d日"
         formatter.locale = Locale(identifier: "zh_CN")
         return formatter.string(from: date)
     }
-    
-    private var formattedDisplayDuration: String {
-        let totalSeconds = Int(displayDuration)
-        let hours = totalSeconds / 3600
-        let minutes = (totalSeconds % 3600) / 60
-        let seconds = totalSeconds % 60
-        
-        if hours > 0 {
-            return String(format: "%d:%02d:%02d", hours, minutes, seconds)
-        } else {
-            return String(format: "%02d:%02d", minutes, seconds)
-        }
-    }
-    
-    private var formattedAwayDuration: String {
-        let totalSeconds = Int(totalAwayDuration)
-        let hours = totalSeconds / 3600
-        let minutes = (totalSeconds % 3600) / 60
-        let seconds = totalSeconds % 60
-        
-        if hours > 0 {
-            return String(format: "%d:%02d:%02d", hours, minutes, seconds)
-        } else {
-            return String(format: "%02d:%02d", minutes, seconds)
-        }
-    }
 }
 
-/// Legend for the timeline view
-struct TimelineLegendView: View {
-    var body: some View {
-        HStack(spacing: 16) {
-            LegendItem(color: Color.statsOceanBlue.opacity(0.7), label: "屏幕亮起")
-            LegendItem(color: Color.statsAmberGlow.opacity(0.6), label: "屏幕熄灭")
-        }
-        .font(.caption)
-    }
-}
+// MARK: - Summary Card
 
-/// Single legend item
-struct LegendItem: View {
-    let color: Color
-    let label: String
-    
-    var body: some View {
-        HStack(spacing: 4) {
-            RoundedRectangle(cornerRadius: 2)
-                .fill(color)
-                .frame(width: 12, height: 12)
-            Text(label)
-                .foregroundStyle(.secondary)
-        }
-    }
-}
+struct SummaryCard: View {
+    let displayDuration: TimeInterval
+    let awayDuration: TimeInterval
 
-/// Timeline visualization showing sessions on a 24-hour scale
-struct TimelineView: View {
-    let sessions: [DisplaySession]
-    
-    private let hourHeight: CGFloat = 30
-    private let calendar = Calendar.current
-    
     var body: some View {
-        GeometryReader { geometry in
-            ZStack(alignment: .topLeading) {
-                // Hour markers
-                ForEach(0..<24, id: \.self) { hour in
-                    HStack(spacing: 8) {
-                        Text(String(format: "%02d:00", hour))
-                            .font(.caption2)
-                            .foregroundStyle(.secondary)
-                            .frame(width: 40, alignment: .trailing)
-                        
-                        Rectangle()
-                            .fill(Color(.separator))
-                            .frame(height: 0.5)
-                    }
-                    .offset(y: CGFloat(hour) * hourHeight)
-                }
-                
-                // Session blocks with away intervals
-                ForEach(sessions, id: \.id) { session in
-                    sessionBlock(for: session, width: geometry.size.width - 60)
-                        .offset(x: 50)
-                }
-            }
-        }
-        .frame(height: 24 * hourHeight + 20)
-    }
-    
-    @ViewBuilder
-    private func sessionBlock(for session: DisplaySession, width: CGFloat) -> some View {
-        let startHour = calendar.component(.hour, from: session.startTime)
-        let startMinute = calendar.component(.minute, from: session.startTime)
-        let startOffset = CGFloat(startHour) * hourHeight + CGFloat(startMinute) / 60.0 * hourHeight
-        
-        let durationMinutes = session.duration / 60.0
-        let blockHeight = max(CGFloat(durationMinutes) / 60.0 * hourHeight, 4) // Min height of 4
-        
-        let blockWidth = width * 0.8
-        let awayIntervals = session.awayIntervals
-        
-        ZStack(alignment: .topLeading) {
-            // Base block (active time - screen on)
-            RoundedRectangle(cornerRadius: 4)
-                .fill(providerColor(session.providerType).opacity(0.7))
-                .frame(width: blockWidth, height: blockHeight)
-            
-            // Overlay away intervals (screen off)
-            ForEach(awayIntervals) { interval in
-                if let intervalOffset = calculateIntervalOffset(session: session, interval: interval),
-                   let intervalHeight = calculateIntervalHeight(interval: interval, sessionDuration: session.duration, blockHeight: blockHeight) {
-                    RoundedRectangle(cornerRadius: 2)
-                        .fill(Color.statsAmberGlow.opacity(0.6))
-                        .frame(width: blockWidth, height: intervalHeight)
-                        .offset(y: intervalOffset)
-                }
-            }
-        }
-        .offset(y: startOffset)
-    }
-    
-    private func calculateIntervalOffset(session: DisplaySession, interval: AwayInterval) -> CGFloat? {
-        let sessionDuration = session.duration
-        guard sessionDuration > 0 else { return nil }
-        
-        let intervalStartOffset = interval.startTime.timeIntervalSince(session.startTime)
-        let relativeOffset = intervalStartOffset / sessionDuration
-        
-        let durationMinutes = sessionDuration / 60.0
-        let blockHeight = max(CGFloat(durationMinutes) / 60.0 * hourHeight, 4)
-        
-        return CGFloat(relativeOffset) * blockHeight
-    }
-    
-    private func calculateIntervalHeight(interval: AwayInterval, sessionDuration: TimeInterval, blockHeight: CGFloat) -> CGFloat? {
-        guard sessionDuration > 0 else { return nil }
-        
-        let relativeHeight = interval.duration / sessionDuration
-        return max(CGFloat(relativeHeight) * blockHeight, 2) // Min height of 2
-    }
-    
-    private func providerColor(_ type: String) -> Color {
-        switch type {
-        case "time": return Color.statsOceanBlue
-        case "timer": return Color.statsJadeGreen
-        default: return .gray
-        }
-    }
-}
+        HStack(spacing: 0) {
+            // Display duration
+            VStack(spacing: 4) {
+                Image(systemName: "sun.max.fill")
+                    .font(.system(size: 16))
+                    .foregroundStyle(Color.statsOceanBlue)
 
-/// Row view for individual session in the list
-struct SessionRowView: View {
-    let session: DisplaySession
-    
-    var body: some View {
-        HStack(spacing: 12) {
-            // Provider icon
-            Image(systemName: providerIcon)
-                .font(.title3)
-                .foregroundStyle(providerColor)
-                .frame(width: 40, height: 40)
-                .background(providerColor.opacity(0.1))
-                .clipShape(RoundedRectangle(cornerRadius: 8))
-            
-            // Time info
-            VStack(alignment: .leading, spacing: 4) {
-                Text(providerName)
-                    .font(.subheadline)
-                    .fontWeight(.medium)
-                
-                Text("\(formattedStartTime) - \(formattedEndTime)")
-                    .font(.caption)
+                Text(formatDuration(displayDuration))
+                    .font(.system(size: 22, weight: .bold, design: .rounded))
+                    .foregroundStyle(.primary)
+
+                Text("亮屏")
+                    .font(.system(size: 11))
                     .foregroundStyle(.secondary)
             }
-            
-            Spacer()
-            
-            // Duration info
-            VStack(alignment: .trailing, spacing: 2) {
-                Text(session.formattedDuration)
-                    .font(.callout)
-                    .fontWeight(.medium)
-                    .fontDesign(.monospaced)
-                    .foregroundStyle(providerColor)
-                
-                if session.totalAwayDuration > 0 {
-                    Text("离开 \(session.formattedAwayDuration)")
-                        .font(.caption2)
-                        .foregroundStyle(Color.statsAmberGlow)
-                }
+            .frame(maxWidth: .infinity)
+
+            // Divider
+            Rectangle()
+                .fill(Color(.separator))
+                .frame(width: 1, height: 50)
+
+            // Away duration
+            VStack(spacing: 4) {
+                Image(systemName: "moon.fill")
+                    .font(.system(size: 16))
+                    .foregroundStyle(Color.statsAmberGlow)
+
+                Text(formatDuration(awayDuration))
+                    .font(.system(size: 22, weight: .bold, design: .rounded))
+                    .foregroundStyle(.primary)
+
+                Text("熄屏")
+                    .font(.system(size: 11))
+                    .foregroundStyle(.secondary)
             }
+            .frame(maxWidth: .infinity)
         }
-        .padding()
+        .padding(.vertical, 16)
         .background(
-            RoundedRectangle(cornerRadius: 12)
-                .fill(Color(.tertiarySystemGroupedBackground))
+            RoundedRectangle(cornerRadius: 16)
+                .fill(Color(.secondarySystemGroupedBackground))
         )
     }
-    
+
+    private func formatDuration(_ duration: TimeInterval) -> String {
+        let totalSeconds = Int(duration)
+        let hours = totalSeconds / 3600
+        let minutes = (totalSeconds % 3600) / 60
+
+        if hours > 0 {
+            return "\(hours)h \(minutes)m"
+        } else {
+            return "\(minutes)m"
+        }
+    }
+}
+
+// MARK: - Empty State
+
+struct EmptyStateView: View {
+    var body: some View {
+        VStack(spacing: 12) {
+            Image(systemName: "moon.zzz.fill")
+                .font(.system(size: 40))
+                .foregroundStyle(.tertiary)
+
+            Text("无使用记录")
+                .font(.subheadline)
+                .foregroundStyle(.secondary)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+}
+
+// MARK: - Compact Session Row
+
+struct CompactSessionRow: View {
+    let session: DisplaySession
+
+    var body: some View {
+        HStack(spacing: 12) {
+            // Provider icon with color
+            Image(systemName: providerIcon)
+                .font(.system(size: 14, weight: .medium))
+                .foregroundStyle(.white)
+                .frame(width: 28, height: 28)
+                .background(providerColor)
+                .clipShape(RoundedRectangle(cornerRadius: 6))
+
+            // Provider name and time
+            VStack(alignment: .leading, spacing: 2) {
+                Text(providerName)
+                    .font(.system(size: 14, weight: .medium))
+
+                Text("\(formattedStartTime) - \(formattedEndTime)")
+                    .font(.system(size: 11))
+                    .foregroundStyle(.secondary)
+            }
+
+            Spacer()
+
+            // Duration
+            Text(session.formattedDuration)
+                .font(.system(size: 14, weight: .semibold, design: .monospaced))
+                .foregroundStyle(providerColor)
+        }
+        .padding(12)
+        .background(
+            RoundedRectangle(cornerRadius: 12)
+                .fill(Color(.secondarySystemGroupedBackground))
+        )
+    }
+
     private var providerIcon: String {
         switch session.providerType {
         case "time": return "clock.fill"
         case "timer": return "timer"
+        case "camera": return "video.fill"
+        case "cat": return "cat.fill"
+        case "video": return "play.rectangle.fill"
         default: return "questionmark"
         }
     }
-    
+
     private var providerName: String {
         switch session.providerType {
         case "time": return "时钟"
         case "timer": return "计时器"
+        case "camera": return "实景"
+        case "cat": return "小猫"
+        case "video": return "视频"
         default: return session.providerType
         }
     }
-    
+
     private var providerColor: Color {
         switch session.providerType {
         case "time": return Color.statsOceanBlue
         case "timer": return Color.statsJadeGreen
+        case "camera": return Color.statsLavender
+        case "cat": return Color.statsPeachPink
+        case "video": return Color.statsAmberGold
         default: return .gray
         }
     }
-    
+
     private var formattedStartTime: String {
         let formatter = DateFormatter()
         formatter.dateFormat = "HH:mm"
         return formatter.string(from: session.startTime)
     }
-    
+
     private var formattedEndTime: String {
         let formatter = DateFormatter()
         formatter.dateFormat = "HH:mm"

@@ -16,13 +16,19 @@ struct PiPItemView: View {
     let isActive: Bool
     let isPreparing: Bool
     let onTap: () -> Void
-    
+
+    /// Optional long press handler for custom content providers
+    var onLongPress: (() -> Void)?
+
     /// Callback to bind PiP view layer when created
     var onPiPViewCreated: ((SampleBufferDisplayView) -> Void)?
-    
+
     /// Display layer for PiP (only needed when preparing/active)
     var displayLayer: AVSampleBufferDisplayLayer?
-    
+
+    /// Optional video URL for video cards to display thumbnail
+    var videoURL: URL?
+
     // Animation state
     @State private var isPressed = false
     
@@ -46,7 +52,7 @@ struct PiPItemView: View {
                     // Normal preview state
                     normalView
                 }
-                
+
                 // Hidden PiP host view - embedded in card to avoid layout reflow
                 if needsPiPHost, let layer = displayLayer {
                     PiPHostView(
@@ -66,18 +72,24 @@ struct PiPItemView: View {
         }
         .buttonStyle(.plain)
         .disabled(isPreparing)
+        .simultaneousGesture(
+            LongPressGesture(minimumDuration: 0.5)
+                .onEnded { _ in
+                    onLongPress?()
+                }
+        )
         .onLongPressGesture(minimumDuration: .infinity, pressing: { pressing in
             isPressed = pressing
         }, perform: {})
     }
-    
+
     // MARK: - Subviews
     
     /// Normal preview card view
     private var normalView: some View {
         ZStack(alignment: .topTrailing) {
             // Preview fills entire card
-            PiPStaticPreview(providerType: providerType)
+            PiPStaticPreview(providerType: providerType, videoURL: videoURL)
             
             // Label at bottom-left - simple text
             VStack {
@@ -85,8 +97,8 @@ struct PiPItemView: View {
                 HStack {
                     Text(providerType.displayName)
                         .font(.system(size: 13, weight: .medium))
-                        .foregroundStyle(.white.opacity(0.9))
-                        .shadow(color: .black.opacity(0.3), radius: 2, x: 0, y: 1)
+                        .foregroundStyle(providerType.hasLightBackground ? .black.opacity(0.8) : .white.opacity(0.9))
+                        .shadow(color: providerType.hasLightBackground ? .clear : .black.opacity(0.3), radius: 2, x: 0, y: 1)
                     Spacer()
                 }
                 .padding(12)
