@@ -48,6 +48,31 @@ struct ContentView: View {
                     }
                     .buttonStyle(.plain)
                     
+                    // Privacy Policy Link
+                    NavigationLink {
+                        PrivacyPolicyView()
+                    } label: {
+                        HStack(spacing: 12) {
+                            Image(systemName: "hand.raised.fill")
+                                .font(.system(size: 16))
+                                .foregroundStyle(.secondary)
+                            
+                            Text("隐私政策")
+                                .font(.system(size: 15))
+                                .foregroundStyle(.secondary)
+                            
+                            Spacer()
+                            
+                            Image(systemName: "chevron.right")
+                                .font(.system(size: 12, weight: .semibold))
+                                .foregroundStyle(.quaternary)
+                        }
+                        .padding(.horizontal, 20)
+                        .padding(.vertical, 14)
+                        .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    
                     Spacer()
                         .frame(height: 40)
                 }
