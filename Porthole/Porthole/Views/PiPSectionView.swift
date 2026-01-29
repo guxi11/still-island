@@ -44,7 +44,7 @@ struct PiPSectionView: View {
             ZStack {
                 // Show preparing hint when PiP is preparing
                 if pipManager.isPreparingPiP {
-                    Text("准备中...")
+                    Text("准备中，请不要退出app")
                         .font(.system(size: 18, weight: .medium))
                         .foregroundStyle(.secondary.opacity(0.7))
                 } else if !isPiPRunning {

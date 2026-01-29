@@ -21,6 +21,9 @@ extension Color {
     static let statsPeachPink = Color(red: 0.96, green: 0.60, blue: 0.55)
     /// 琥珀金 - 视频类型
     static let statsAmberGold = Color(red: 0.95, green: 0.68, blue: 0.25)
+    
+    /// 日历主色调 - 翡翠绿
+    static let calendarThemeColor = Color.statsJadeGreen
 }
 
 /// Calendar view with monthly navigation and usage intensity indication
@@ -35,51 +38,50 @@ struct CalendarStatsView: View {
 
     var body: some View {
         ScrollView {
-            VStack(spacing: 16) {
-                // Month navigation card
+            VStack(spacing: 24) {
+                // Month navigation
                 HStack {
                     Button(action: previousMonth) {
                         Image(systemName: "chevron.left")
-                            .font(.system(size: 14, weight: .semibold))
-                            .foregroundStyle(.secondary)
-                            .frame(width: 32, height: 32)
-                            .background(Color(.tertiarySystemFill))
-                            .clipShape(Circle())
+                            .font(.system(size: 20, weight: .medium))
+                            .foregroundStyle(Color.primary)
+                            .frame(width: 44, height: 44)
+                            .contentShape(Rectangle())
                     }
 
                     Spacer()
 
                     Text(monthYearString)
-                        .font(.system(size: 18, weight: .bold, design: .rounded))
+                        .font(.system(size: 20, weight: .semibold, design: .rounded))
+                        .foregroundStyle(.primary)
 
                     Spacer()
 
                     Button(action: nextMonth) {
                         Image(systemName: "chevron.right")
-                            .font(.system(size: 14, weight: .semibold))
-                            .foregroundStyle(.secondary)
-                            .frame(width: 32, height: 32)
-                            .background(Color(.tertiarySystemFill))
-                            .clipShape(Circle())
+                            .font(.system(size: 20, weight: .medium))
+                            .foregroundStyle(Color.primary)
+                            .frame(width: 44, height: 44)
+                            .contentShape(Rectangle())
                     }
                 }
                 .padding(.horizontal, 16)
-                .padding(.top, 12)
+                .padding(.top, 16)
 
-                // Calendar grid card
-                VStack(spacing: 12) {
+                // Calendar grid
+                VStack(spacing: 16) {
                     // Weekday headers
                     HStack(spacing: 0) {
                         ForEach(weekdaySymbols, id: \.self) { symbol in
                             Text(symbol)
-                                .font(.system(size: 11, weight: .medium))
-                                .foregroundStyle(.tertiary)
+                                .font(.system(size: 13, weight: .medium))
+                                .foregroundStyle(.secondary)
                                 .frame(maxWidth: .infinity)
                         }
                     }
 
-                    // Calendar grid - GitHub style heatmap
-                    LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 6), count: 7), spacing: 6) {
+                    // Calendar grid
+                    LazyVGrid(columns: Array(repeating: GridItem(.flexible()), count: 7), spacing: 12) {
                         ForEach(daysInMonth, id: \.self) { date in
                             if let date = date {
                                 ModernDayCell(
@@ -94,42 +96,18 @@ struct CalendarStatsView: View {
                                     showDayDetail = true
                                 }
                             } else {
-                                RoundedRectangle(cornerRadius: 6)
-                                    .fill(Color.clear)
+                                Color.clear
                                     .aspectRatio(1, contentMode: .fill)
                             }
                         }
                     }
                 }
-                .padding(16)
-                .background(
-                    RoundedRectangle(cornerRadius: 16)
-                        .fill(Color(.secondarySystemGroupedBackground))
-                )
-                .padding(.horizontal, 16)
+                .padding(.horizontal, 20)
 
-                // Legend
-                HStack(spacing: 8) {
-                    Text("少")
-                        .font(.system(size: 10))
-                        .foregroundStyle(.tertiary)
-
-                    ForEach(0..<5) { level in
-                        RoundedRectangle(cornerRadius: 3)
-                            .fill(intensityColor(level: level))
-                            .frame(width: 14, height: 14)
-                    }
-
-                    Text("多")
-                        .font(.system(size: 10))
-                        .foregroundStyle(.tertiary)
-                }
-                .padding(.top, 4)
-
-                Spacer(minLength: 40)
+                Spacer(minLength: 16)
             }
         }
-        .background(Color(.systemGroupedBackground))
+        .background(Color(.systemBackground))
         .navigationTitle("日历")
         .navigationBarTitleDisplayMode(.inline)
         .sheet(isPresented: $showDayDetail) {
@@ -146,10 +124,10 @@ struct CalendarStatsView: View {
     private func intensityColor(level: Int) -> Color {
         switch level {
         case 0: return Color(.systemFill)
-        case 1: return Color.statsOceanBlue.opacity(0.25)
-        case 2: return Color.statsOceanBlue.opacity(0.50)
-        case 3: return Color.statsOceanBlue.opacity(0.75)
-        default: return Color.statsOceanBlue
+        case 1: return Color.calendarThemeColor.opacity(0.25)
+        case 2: return Color.calendarThemeColor.opacity(0.50)
+        case 3: return Color.calendarThemeColor.opacity(0.75)
+        default: return Color.calendarThemeColor
         }
     }
 
@@ -195,7 +173,7 @@ struct CalendarStatsView: View {
 
     private func previousMonth() {
         if let newMonth = calendar.date(byAdding: .month, value: -1, to: currentMonth) {
-            withAnimation(.easeInOut(duration: 0.2)) {
+            withAnimation(.snappy) {
                 currentMonth = newMonth
             }
         }
@@ -203,14 +181,14 @@ struct CalendarStatsView: View {
 
     private func nextMonth() {
         if let newMonth = calendar.date(byAdding: .month, value: 1, to: currentMonth) {
-            withAnimation(.easeInOut(duration: 0.2)) {
+            withAnimation(.snappy) {
                 currentMonth = newMonth
             }
         }
     }
 }
 
-/// Modern day cell with GitHub-style heatmap design
+/// Modern day cell with minimalistic design
 struct ModernDayCell: View {
     let date: Date
     let isSelected: Bool
@@ -222,36 +200,50 @@ struct ModernDayCell: View {
 
     var body: some View {
         ZStack {
-            // Background - intensity based fill
-            RoundedRectangle(cornerRadius: 6)
-                .fill(fillColor)
+            // Background - always show duration color if exists
+            if duration > 0 {
+                Circle()
+                    .fill(fillColor)
+            } else {
+                Circle()
+                    .fill(Color.clear)
+            }
+
+            // Selection Indicator (Ring)
+            if isSelected {
+                Circle()
+                    .stroke(Color.calendarThemeColor, lineWidth: 2)
+            } else if isToday {
+                // Today indicator (lighter ring if not selected)
+                Circle()
+                    .stroke(Color.calendarThemeColor.opacity(0.5), lineWidth: 1.5)
+            }
 
             // Day number
             Text("\(calendar.component(.day, from: date))")
-                .font(.system(size: 13, weight: isToday ? .bold : .medium, design: .rounded))
+                .font(.system(size: 15, weight: isSelected || isToday ? .semibold : .regular, design: .rounded))
                 .foregroundStyle(textColor)
         }
         .aspectRatio(1, contentMode: .fill)
-        .overlay(
-            RoundedRectangle(cornerRadius: 6)
-                .stroke(isToday ? Color.statsOceanBlue : (isSelected ? Color.statsOceanBlue.opacity(0.5) : Color.clear), lineWidth: isToday ? 2 : 1.5)
-        )
     }
 
     private var fillColor: Color {
-        if duration == 0 {
-            return Color(.systemFill)
-        }
         let intensity = maxDuration > 0 ? min(duration / maxDuration, 1.0) : 0
-        return Color.statsOceanBlue.opacity(0.2 + (intensity * 0.8))
+        // 使用更柔和的绿色渐变
+        return Color.calendarThemeColor.opacity(0.15 + (intensity * 0.6))
     }
 
     private var textColor: Color {
-        if duration == 0 {
-            return .secondary
+        // 如果有数据，文字颜色根据背景深浅决定
+        if duration > 0 {
+            let intensity = maxDuration > 0 ? min(duration / maxDuration, 1.0) : 0
+            return intensity > 0.6 ? .white : .primary
         }
-        let intensity = maxDuration > 0 ? min(duration / maxDuration, 1.0) : 0
-        return intensity > 0.5 ? .white : .primary
+        // 无数据时，选中或今日显示主题色
+        if isSelected || isToday {
+            return Color.calendarThemeColor
+        }
+        return .primary
     }
 }
 

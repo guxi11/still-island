@@ -68,7 +68,7 @@ final class CelebrationView: UIView {
         topLabel.font = UIFont.systemFont(ofSize: 14, weight: .medium)
         topLabel.textColor = UIColor.white.withAlphaComponent(0.8)
         topLabel.alpha = 0
-        topLabel.text = "你已休息中"
+        topLabel.text = "你已充实度过了"
         containerView.addSubview(topLabel)
         
         // Duration label (main text showing time away)

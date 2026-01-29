@@ -107,7 +107,7 @@ struct StatisticsView: View {
             .chartYAxis {
                 AxisMarks(position: .leading) { value in
                     AxisGridLine()
-                        .foregroundStyle(Color.primary.opacity(0.06))
+                        .foregroundStyle(.primary.opacity(0.06))
                     AxisValueLabel {
                         if let minutes = value.as(Double.self) {
                             Text(formatAxisLabelChinese(minutes))
