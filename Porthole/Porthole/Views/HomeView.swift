@@ -146,16 +146,20 @@ struct HomeView: View {
     }
     
     private func sidebarOffset(sidebarWidth: CGFloat) -> CGFloat {
-        let baseOffset = viewState == .sidebar ? 0 : -sidebarWidth
-        
-        // Only adjust if we are interacting with the sidebar layer
-        if viewState == .main && dragOffset > 0 {
-            return baseOffset + dragOffset
-        } else if viewState == .sidebar && dragOffset < 0 {
-            return baseOffset + dragOffset
+        switch viewState {
+        case .sidebar:
+            // Sidebar is open, allow closing drag
+            if dragOffset < 0 {
+                return dragOffset
+            }
+            return 0
+        case .main:
+            // Sidebar is closed, allow opening drag
+            if dragOffset > 0 {
+                return -sidebarWidth + dragOffset
+            }
+            return -sidebarWidth
         }
-        
-        return baseOffset
     }
     
     private func autoStartPiP() {
