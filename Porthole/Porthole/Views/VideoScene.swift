@@ -21,7 +21,7 @@ class VideoScene: SKScene {
     
     // MARK: - Nodes
     
-    private var videoNode: SKSpriteNode!
+    private var videoNode: SKSpriteNode?
     
     // MARK: - State
     
@@ -47,9 +47,10 @@ class VideoScene: SKScene {
     // MARK: - Setup
     
     private func setupPlaceholder() {
-        videoNode = SKSpriteNode(color: .darkGray, size: size)
-        videoNode.position = CGPoint(x: size.width / 2, y: size.height / 2)
-        addChild(videoNode)
+        let node = SKSpriteNode(color: .darkGray, size: size)
+        node.position = CGPoint(x: size.width / 2, y: size.height / 2)
+        addChild(node)
+        videoNode = node
     }
     
     override func didChangeSize(_ oldSize: CGSize) {
@@ -101,23 +102,23 @@ class VideoScene: SKScene {
     
     /// Start playing the video loop
     func startAnimation() {
-        guard isLoaded, !textures.isEmpty, !isAnimating else { return }
+        guard isLoaded, !textures.isEmpty, !isAnimating, let node = videoNode else { return }
         
         isAnimating = true
-        videoNode.removeAction(forKey: "videoLoop")
+        node.removeAction(forKey: "videoLoop")
         
         // Use resize: false to avoid resampling textures during animation (smoother)
         let animate = SKAction.animate(with: textures, timePerFrame: timePerFrame, resize: false, restore: false)
         let forever = SKAction.repeatForever(animate)
         
-        videoNode.run(forever, withKey: "videoLoop")
+        node.run(forever, withKey: "videoLoop")
         print("[VideoScene] Animation started with \(textures.count) frames at \(1.0/timePerFrame) fps")
     }
     
     /// Stop the animation
     func stopAnimation() {
         isAnimating = false
-        videoNode.removeAction(forKey: "videoLoop")
+        videoNode?.removeAction(forKey: "videoLoop")
         print("[VideoScene] Animation stopped")
     }
     
@@ -243,7 +244,7 @@ class VideoScene: SKScene {
             if self.isLoaded {
                 // Update node with first texture
                 if let firstTexture = extractedTextures.first {
-                    self.videoNode.texture = firstTexture
+                    self.videoNode?.texture = firstTexture
                 }
                 // Apply aspect-fit layout
                 self.updateVideoNodeLayout()

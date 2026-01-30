@@ -13,6 +13,10 @@ import AVKit
 struct PiPSectionView: View {
     @ObservedObject var pipManager: PiPManager
     @ObservedObject private var cardManager = CardManager.shared
+    
+    /// Whether this view should handle binding the PiP layer.
+    /// Set to false if a parent view handles the binding.
+    var shouldBindPiP: Bool = true
 
     // Keep strong reference to current provider
     @State private var currentProvider: PiPContentProvider?
@@ -29,7 +33,6 @@ struct PiPSectionView: View {
     @State private var activeCardId: UUID?
 
     private let columns = [
-        GridItem(.flexible(), spacing: 16),
         GridItem(.flexible(), spacing: 16)
     ]
 
@@ -40,24 +43,10 @@ struct PiPSectionView: View {
 
     var body: some View {
         VStack(spacing: 20) {
-            // Top empty area with guide text
-            ZStack {
-                // Show preparing hint when PiP is preparing
-                if pipManager.isPreparingPiP {
-                    Text("准备中，请不要退出app")
-                        .font(.system(size: 18, weight: .medium))
-                        .foregroundStyle(.secondary.opacity(0.7))
-                } else if !isPiPRunning {
-                    // Show default hint when no PiP is running
-                    Text("点击卡片打开舷窗")
-                        .font(.system(size: 18, weight: .medium))
-                        .foregroundStyle(.secondary.opacity(0.5))
-                }
-                // When PiP is active, show nothing
-            }
-            .frame(height: 120)
+            // Top padding
+            Spacer().frame(height: 20)
 
-            // Dual-column grid of cards
+            // Single-column grid of cards
             LazyVGrid(columns: columns, spacing: 16) {
                 // User's cards
                 ForEach(cardManager.cards, id: \.id) { card in
@@ -71,11 +60,11 @@ struct PiPSectionView: View {
                                 handleCardTap(card)
                             },
                             onLongPress: nil,
-                            onPiPViewCreated: isCardActive(card) || isCardPreparing(card) ? { view in
+                            onPiPViewCreated: (shouldBindPiP && (isCardActive(card) || isCardPreparing(card))) ? { view in
                                 print("[PiPSectionView] SampleBufferDisplayView created inside card")
                                 pipManager.bindToViewLayer(view)
                             } : nil,
-                            displayLayer: isCardActive(card) || isCardPreparing(card) ? pipManager.displayLayer : nil,
+                            displayLayer: (shouldBindPiP && (isCardActive(card) || isCardPreparing(card))) ? pipManager.displayLayer : nil,
                             videoURL: videoConfig?.videoURL
                         )
                         .contextMenu {
@@ -99,6 +88,20 @@ struct PiPSectionView: View {
                     .font(.caption)
                     .foregroundStyle(.red.opacity(0.8))
                     .padding(.horizontal)
+            }
+        }
+        .onAppear {
+            // Sync active state on appear
+            if pipManager.isPiPActive || pipManager.isPreparingPiP {
+                activeCardId = cardManager.lastOpenedCardId
+            }
+        }
+        .onChange(of: pipManager.isPiPActive) { isActive in
+            if !isActive {
+                activeCardId = nil
+            } else if activeCardId == nil {
+                // If PiP became active but we don't have an ID (e.g. started externally), try to sync
+                activeCardId = cardManager.lastOpenedCardId
             }
         }
         .sheet(isPresented: $showVideoPicker) {
@@ -162,13 +165,25 @@ struct PiPSectionView: View {
             return
         }
 
-        // If another card is active, stop it first
+        // If another card is active, stop it first and wait before starting new one
         if pipManager.isPiPActive || pipManager.isPreparingPiP {
+            print("[PiPSectionView] Stopping current PiP before switching...")
             pipManager.stopPiP()
             currentProvider = nil
             activeCardId = nil
+            
+            // Delay slightly to ensure cleanup is complete before starting new PiP
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+                self.startPiP(for: card, providerType: providerType)
+            }
+            return
         }
 
+        // Start immediately if nothing is running
+        startPiP(for: card, providerType: providerType)
+    }
+    
+    private func startPiP(for card: CardInstance, providerType: PiPProviderType) {
         // For video provider, check if video is selected
         if providerType == .video {
             let config = VideoCardConfiguration.decode(from: card.configurationData)
@@ -180,9 +195,14 @@ struct PiPSectionView: View {
             }
         }
 
+        print("[PiPSectionView] Starting PiP for card: \(card.id)")
+
         // Generate new view ID to force recreation
         pipViewId = UUID()
         activeCardId = card.id
+        
+        // Update last opened card
+        cardManager.updateLastOpenedCard(id: card.id)
 
         // Create and start new provider with card's configuration
         let provider = providerType.createProvider(with: card.configurationData)
@@ -205,6 +225,9 @@ struct PiPSectionView: View {
             // Generate new view ID to force recreation
             pipViewId = UUID()
             activeCardId = card.id
+            
+            // Update last opened card
+            cardManager.updateLastOpenedCard(id: card.id)
 
             // Create provider with updated configuration
             // Need to reload to get updated configurationData

@@ -19,6 +19,21 @@ final class CardManager: ObservableObject {
     @Published private(set) var cards: [CardInstance] = []
 
     private var modelContext: ModelContext?
+    
+    /// The ID of the last opened card, persisted in UserDefaults
+    var lastOpenedCardId: UUID? {
+        get {
+            guard let uuidString = UserDefaults.standard.string(forKey: "lastOpenedCardId") else { return nil }
+            return UUID(uuidString: uuidString)
+        }
+        set {
+            if let uuid = newValue {
+                UserDefaults.standard.set(uuid.uuidString, forKey: "lastOpenedCardId")
+            } else {
+                UserDefaults.standard.removeObject(forKey: "lastOpenedCardId")
+            }
+        }
+    }
 
     private init() {}
 
@@ -130,6 +145,11 @@ final class CardManager: ObservableObject {
         save()
         loadCards()
         print("[CardManager] Updated video configuration for card: \(cardId)")
+    }
+    
+    /// Updates the last opened card ID
+    func updateLastOpenedCard(id: UUID) {
+        lastOpenedCardId = id
     }
 
     /// Gets available provider types that can be added

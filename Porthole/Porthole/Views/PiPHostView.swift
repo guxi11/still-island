@@ -43,7 +43,12 @@ class SampleBufferDisplayView: UIView {
     
     /// The AVSampleBufferDisplayLayer that backs this view
     var sampleBufferDisplayLayer: AVSampleBufferDisplayLayer {
-        return layer as! AVSampleBufferDisplayLayer
+        guard let layer = layer as? AVSampleBufferDisplayLayer else {
+            print("[SampleBufferDisplayView] CRITICAL ERROR: Layer is not AVSampleBufferDisplayLayer. Actual type: \(type(of: layer))")
+            // Return a temporary layer to avoid crash, though PiP won't work correctly
+            return AVSampleBufferDisplayLayer()
+        }
+        return layer
     }
     
     override init(frame: CGRect) {

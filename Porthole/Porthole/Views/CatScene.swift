@@ -21,7 +21,7 @@ class CatScene: SKScene {
 
     // MARK: - Nodes
     
-    private var catNode: SKSpriteNode!
+    private var catNode: SKSpriteNode?
     
     // MARK: - State
     
@@ -98,25 +98,27 @@ class CatScene: SKScene {
     private func setupScene() {
         removeAllChildren()
         
+        let node: SKSpriteNode
         if !textures.isEmpty {
-            catNode = SKSpriteNode(texture: textures[0])
+            node = SKSpriteNode(texture: textures[0])
             // Scale to fit within scene bounds while maintaining aspect ratio
             let textureSize = textures[0].size()
             let maxScale = min(size.width / textureSize.width, size.height / textureSize.height) * 0.8
-            catNode.setScale(maxScale)
+            node.setScale(maxScale)
         } else {
             // Placeholder
-            catNode = SKSpriteNode(color: .orange, size: CGSize(width: 60, height: 40))
+            node = SKSpriteNode(color: .orange, size: CGSize(width: 60, height: 40))
             let label = SKLabelNode(text: "No 'cat_sprites'")
             label.fontSize = 8
             label.fontColor = .black
             label.position = CGPoint(x: 0, y: -5)
-            catNode.addChild(label)
+            node.addChild(label)
             print("[CatScene] No textures found. Please add 'cat_sprites' to Assets.")
         }
         
-        catNode.position = CGPoint(x: size.width / 2, y: size.height / 2)
-        addChild(catNode)
+        node.position = CGPoint(x: size.width / 2, y: size.height / 2)
+        addChild(node)
+        catNode = node
         
         startBongoAnimation()
     }
@@ -127,17 +129,17 @@ class CatScene: SKScene {
         // Ensure scene is set up before starting animation
         setupSceneIfNeeded()
 
-        guard !textures.isEmpty else { return }
+        guard !textures.isEmpty, let node = catNode else { return }
 
-        catNode.removeAction(forKey: "run")
+        node.removeAction(forKey: "run")
 
         let animate = SKAction.animate(with: textures, timePerFrame: timePerFrame)
         let forever = SKAction.repeatForever(animate)
 
-        catNode.run(forever, withKey: "run")
+        node.run(forever, withKey: "run")
     }
     
     func stopAnimation() {
-        catNode.removeAction(forKey: "run")
+        catNode?.removeAction(forKey: "run")
     }
 }
