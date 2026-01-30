@@ -74,7 +74,42 @@ final class PiPManager: NSObject, ObservableObject {
         super.init()
         print("[PiPManager] Initializing...")
         configureAudioSession()
+        setupLifecycleObservers()
         print("[PiPManager] PiP supported: \(AVPictureInPictureController.isPictureInPictureSupported())")
+    }
+
+    // MARK: - Lifecycle Observation
+    
+    private func setupLifecycleObservers() {
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(handleAppDidEnterBackground),
+            name: UIApplication.didEnterBackgroundNotification,
+            object: nil
+        )
+        
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(handleAppWillEnterForeground),
+            name: UIApplication.willEnterForegroundNotification,
+            object: nil
+        )
+    }
+    
+    @objc private func handleAppDidEnterBackground() {
+        print("[PiPManager] App entering background")
+        // Note: We do NOT stop the converter here if PiP is active.
+        // The converter must continue running to update the PiP window content
+        // even when the app is in the background.
+    }
+    
+    @objc private func handleAppWillEnterForeground() {
+        print("[PiPManager] App entering foreground")
+        // Ensure converter is running if needed
+        if isPiPActive && !isDirectVideoProvider && isPlaying && !(videoStreamConverter?.isCapturing ?? false) {
+            print("[PiPManager] Restarting preview converter for foreground check")
+            videoStreamConverter?.startCapture(frameRate: currentProvider?.preferredFrameRate ?? 10)
+        }
     }
 
     // MARK: - Public Methods

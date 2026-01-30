@@ -22,7 +22,7 @@ final class TimeDisplayProvider: PiPContentProvider {
     // MARK: - PiPContentProvider
     
     let contentView: UIView
-    let preferredFrameRate: Int = 10
+    let preferredFrameRate: Int = 1
     
     // MARK: - Private Properties
     

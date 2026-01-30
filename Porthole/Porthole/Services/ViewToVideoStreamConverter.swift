@@ -256,10 +256,6 @@ final class ViewToVideoStreamConverter {
             setupPixelBufferPool(for: size)
         }
         
-        // Force layout before rendering
-        view.setNeedsLayout()
-        view.layoutIfNeeded()
-        
         // Create pixel buffer from view using UIGraphicsImageRenderer
         guard let pixelBuffer = createPixelBufferUsingRenderer(from: view) else {
             if frameCount < 5 {
@@ -339,16 +335,6 @@ final class ViewToVideoStreamConverter {
             return nil
         }
         
-        // Render view to image
-        let renderer = UIGraphicsImageRenderer(size: view.bounds.size)
-        let image = renderer.image { context in
-            view.layer.render(in: context.cgContext)
-        }
-        
-        guard let cgImage = image.cgImage else {
-            return nil
-        }
-        
         // Create pixel buffer
         var pixelBuffer: CVPixelBuffer?
         let status = CVPixelBufferPoolCreatePixelBuffer(nil, pool, &pixelBuffer)
@@ -371,10 +357,18 @@ final class ViewToVideoStreamConverter {
             return nil
         }
         
-        // Draw image to pixel buffer
-        let width = CVPixelBufferGetWidth(buffer)
-        let height = CVPixelBufferGetHeight(buffer)
-        context.draw(cgImage, in: CGRect(x: 0, y: 0, width: width, height: height))
+        // Scale context to match screen scale and flip y-axis for correct orientation
+        // Core Graphics context origin is bottom-left, UIKit is top-left.
+        // We need to translate and scale to flip it back.
+        let scale = UIScreen.main.scale
+        let height = CGFloat(CVPixelBufferGetHeight(buffer))
+        
+        context.translateBy(x: 0, y: height)
+        context.scaleBy(x: scale, y: -scale)
+        
+        // Render directly to the pixel buffer's context
+        // This avoids creating an intermediate UIImage and double rendering
+        view.layer.render(in: context)
         
         return buffer
     }

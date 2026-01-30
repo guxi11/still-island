@@ -15,7 +15,6 @@ struct HomeView: View {
     enum HomeViewState {
         case sidebar
         case main
-        case statistics
     }
     
     var body: some View {
@@ -75,53 +74,11 @@ struct HomeView: View {
                     
                     // Layer 2: Sidebar (Overlay from Left)
                     SidebarView(
-                        pipManager: pipManager,
-                        onStatisticsTap: {
-                            withAnimation(.spring()) {
-                                viewState = .statistics
-                            }
-                        }
+                        pipManager: pipManager
                     )
                     .frame(width: sidebarWidth)
                     .background(Color(.systemGroupedBackground))
                     .offset(x: sidebarOffset(sidebarWidth: sidebarWidth))
-                    
-                    // Layer 3: Statistics (Full Screen Overlay from Right)
-                    ZStack {
-                        Color(.systemGroupedBackground)
-                            .ignoresSafeArea()
-                        
-                        VStack(spacing: 0) {
-                            // Custom Header
-                            HStack {
-                                Button {
-                                    withAnimation(.spring()) {
-                                        viewState = .main
-                                    }
-                                } label: {
-                                    HStack(spacing: 4) {
-                                        Image(systemName: "chevron.left")
-                                        Text("返回")
-                                    }
-                                    .foregroundStyle(.blue)
-                                }
-                                Spacer()
-                                Text("使用统计")
-                                    .font(.headline)
-                                Spacer()
-                                Color.clear.frame(width: 60) // Balance spacing
-                            }
-                            .padding(.horizontal, 20)
-                            .padding(.bottom, 10)
-                            .frame(height: 50)
-                            .background(Color(.systemGroupedBackground))
-                            
-                            StatisticsView()
-                        }
-                        .padding(.top, geometry.safeAreaInsets.top)
-                    }
-                    .frame(width: screenWidth)
-                    .offset(x: statisticsOffset(screenWidth: screenWidth))
                 }
                 .gesture(
                     DragGesture()
@@ -130,13 +87,11 @@ struct HomeView: View {
                             
                             switch viewState {
                             case .main:
-                                dragOffset = translation
-                            case .sidebar:
-                                if translation < 0 { // Only allow closing sidebar
+                                if translation > 0 { // Only allow opening sidebar
                                     dragOffset = translation
                                 }
-                            case .statistics:
-                                if translation > 0 { // Only allow closing statistics
+                            case .sidebar:
+                                if translation < 0 { // Only allow closing sidebar
                                     dragOffset = translation
                                 }
                             }
@@ -150,15 +105,9 @@ struct HomeView: View {
                                 case .main:
                                     if translation > threshold {
                                         viewState = .sidebar
-                                    } else if translation < -threshold {
-                                        viewState = .statistics
                                     }
                                 case .sidebar:
                                     if translation < -threshold {
-                                        viewState = .main
-                                    }
-                                case .statistics:
-                                    if translation > threshold {
                                         viewState = .main
                                     }
                                 }
@@ -209,19 +158,6 @@ struct HomeView: View {
         return baseOffset
     }
     
-    private func statisticsOffset(screenWidth: CGFloat) -> CGFloat {
-        let baseOffset = viewState == .statistics ? 0 : screenWidth
-        
-        // Only adjust if we are interacting with the statistics layer
-        if viewState == .main && dragOffset < 0 {
-            return baseOffset + dragOffset
-        } else if viewState == .statistics && dragOffset > 0 {
-            return baseOffset + dragOffset
-        }
-        
-        return baseOffset
-    }
-    
     private func autoStartPiP() {
         // Only auto-start if not already active and we have a last opened card
         guard !pipManager.isPiPActive, !pipManager.isPreparingPiP,
@@ -241,7 +177,6 @@ struct HomeView: View {
 
 struct SidebarView: View {
     @ObservedObject var pipManager: PiPManager
-    var onStatisticsTap: () -> Void
     
     var body: some View {
         VStack(spacing: 0) {
@@ -263,8 +198,8 @@ struct SidebarView: View {
                         .padding(.top, 10)
                     
                     // Statistics Button
-                    Button {
-                        onStatisticsTap()
+                    NavigationLink {
+                        StatisticsView()
                     } label: {
                         HStack(spacing: 12) {
                             Image(systemName: "chart.bar.fill")
