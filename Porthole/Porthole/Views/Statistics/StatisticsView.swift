@@ -49,7 +49,7 @@ struct StatisticsView: View {
                         RoundedRectangle(cornerRadius: 2)
                             .fill(Color.statsOceanBlue)
                             .frame(width: 10, height: 10)
-                        Text("预览生活")
+                        Text("看见生活")
                             .font(.system(size: 13))
                             .foregroundStyle(.secondary)
                     }
@@ -77,7 +77,7 @@ struct StatisticsView: View {
             
             // Stacked bar chart - shows both display and away time
             Chart(chartData) { item in
-                // Display time (ocean blue - 预览生活)
+                // Display time (ocean blue - 看见生活)
                 BarMark(
                     x: .value("日期", item.date, unit: .day),
                     y: .value("时长", item.displayMinutes)
@@ -172,7 +172,7 @@ struct StatisticsView: View {
             // Stats for selected date
             VStack(spacing: 0) {
                 statRow(
-                    title: "预览生活",
+                    title: "看见生活",
                     duration: selectedDayDisplayDuration,
                     color: .statsOceanBlue
                 )
