@@ -34,6 +34,7 @@ final class TimeDisplayProvider: PiPContentProvider {
     private var celebrationView: CelebrationView?
     private var cancellables = Set<AnyCancellable>()
     private var isCelebrating = false
+    private var lastCelebratedIntervalId: UUID? // 防止重复触发
     
     // MARK: - Initialization
     
@@ -45,7 +46,8 @@ final class TimeDisplayProvider: PiPContentProvider {
         // Create container view with fixed size
         let containerSize = CGSize(width: 200, height: 100)
         let container = UIView(frame: CGRect(origin: .zero, size: containerSize))
-        container.backgroundColor = UIColor(red: 0.1, green: 0.1, blue: 0.15, alpha: 1.0)
+        // OLED省电：使用纯黑背景，OLED屏幕黑色像素不发光
+        container.backgroundColor = UIColor.black
         
         // Create time label with Auto Layout for proper centering
         let label = UILabel()
@@ -126,15 +128,20 @@ final class TimeDisplayProvider: PiPContentProvider {
     private func setupCelebrationObserver() {
         print("[TimeDisplayProvider] Setting up celebration observer")
         
+        // 先清除旧订阅，防止重复
+        cancellables.removeAll()
+        
         // Subscribe to away interval completion
-        // Using dropFirst to ignore initial nil value
         DisplayTimeTracker.shared.$lastCompletedAwayInterval
-            .dropFirst()  // Skip initial nil
             .compactMap { $0 }
             .receive(on: DispatchQueue.main)
             .sink { [weak self] interval in
+                guard let self = self else { return }
+                // 防止对同一个 interval 重复触发庆祝
+                guard self.lastCelebratedIntervalId != interval.id else { return }
+                self.lastCelebratedIntervalId = interval.id
                 print("[TimeDisplayProvider] Received away interval: \(interval.duration) seconds")
-                self?.showCelebration(duration: interval.duration)
+                self.showCelebration(duration: interval.duration)
             }
             .store(in: &cancellables)
         

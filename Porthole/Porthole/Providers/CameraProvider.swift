@@ -24,37 +24,41 @@ final class CameraProvider: NSObject, PiPContentProvider {
     static let iconName: String = "video.fill"
     
     // MARK: - PiPContentProvider Properties
-    
+
     let contentView: UIView
     let preferredFrameRate: Int = 30
-    
+
     // MARK: - Private Properties
-    
-    private var captureSession: AVCaptureSession?
-    private var previewLayer: AVCaptureVideoPreviewLayer?
-    
+
+    private let displayLayer: AVSampleBufferDisplayLayer
+    private var renderer: CameraHardwareRenderer?
     private let placeholderLabel: UILabel
     private var isRunning = false
     
     // Notification observers
-    private var interruptionObserver: NSObjectProtocol?
-    private var interruptionEndedObserver: NSObjectProtocol?
     private var appDidBecomeActiveObserver: NSObjectProtocol?
     
     // Celebration
     private var celebrationView: CelebrationView?
     private var cancellables = Set<AnyCancellable>()
     private var isCelebrating = false
+    private var lastCelebratedIntervalId: UUID? // 防止重复触发
     
     // MARK: - Initialization
     
     override init() {
         // Create container view
         let containerSize = CGSize(width: 200, height: 100)
-        let container = CameraContainerView(frame: CGRect(origin: .zero, size: containerSize))
+        let container = VideoLayerView(frame: CGRect(origin: .zero, size: containerSize))
         container.backgroundColor = UIColor.black
         container.clipsToBounds = true
-        
+
+        // Create display layer
+        displayLayer = AVSampleBufferDisplayLayer()
+        displayLayer.frame = container.bounds
+        displayLayer.videoGravity = .resizeAspectFill
+        container.layer.insertSublayer(displayLayer, at: 0)
+
         // Create placeholder label
         let label = UILabel()
         label.font = UIFont.systemFont(ofSize: 14, weight: .medium)
@@ -64,7 +68,7 @@ final class CameraProvider: NSObject, PiPContentProvider {
         label.backgroundColor = .clear
         label.translatesAutoresizingMaskIntoConstraints = false
         container.addSubview(label)
-        
+
         // Center the label
         NSLayoutConstraint.activate([
             label.centerXAnchor.constraint(equalTo: container.centerXAnchor),
@@ -72,26 +76,21 @@ final class CameraProvider: NSObject, PiPContentProvider {
             label.leadingAnchor.constraint(greaterThanOrEqualTo: container.leadingAnchor, constant: 8),
             label.trailingAnchor.constraint(lessThanOrEqualTo: container.trailingAnchor, constant: -8)
         ])
-        
+
         self.contentView = container
         self.placeholderLabel = label
-        
+
         super.init()
-        
-        print("[CameraProvider] Initialized")
+
+        print("[CameraProvider] Initialized with hardware-accelerated renderer")
     }
     
     deinit {
         // Clean up observers
-        if let observer = interruptionObserver {
-            NotificationCenter.default.removeObserver(observer)
-        }
-        if let observer = interruptionEndedObserver {
-            NotificationCenter.default.removeObserver(observer)
-        }
         if let observer = appDidBecomeActiveObserver {
             NotificationCenter.default.removeObserver(observer)
         }
+        renderer?.stop()
     }
     
     // MARK: - PiPContentProvider Methods
@@ -129,139 +128,44 @@ final class CameraProvider: NSObject, PiPContentProvider {
     func stop() {
         print("[CameraProvider] stop()")
         isRunning = false
-        
+
         // Clean up celebration
         cancellables.removeAll()
         removeCelebration()
-        
+
         // Remove notification observers
-        if let observer = interruptionObserver {
-            NotificationCenter.default.removeObserver(observer)
-            interruptionObserver = nil
-        }
-        if let observer = interruptionEndedObserver {
-            NotificationCenter.default.removeObserver(observer)
-            interruptionEndedObserver = nil
-        }
         if let observer = appDidBecomeActiveObserver {
             NotificationCenter.default.removeObserver(observer)
             appDidBecomeActiveObserver = nil
         }
-        
-        captureSession?.stopRunning()
-        previewLayer?.removeFromSuperlayer()
-        previewLayer = nil
-        captureSession = nil
+
+        renderer?.stop()
+        renderer = nil
     }
     
     // MARK: - Private Methods
     
     private func setupCamera() {
         print("[CameraProvider] Setting up camera...")
-        
+
         // Configure audio session
         configureAudioSession()
-        
-        let session = AVCaptureSession()
-        session.sessionPreset = .medium
-        
-        // Enable multitasking camera access (iOS 16+)
-        if #available(iOS 16.0, *) {
-            if session.isMultitaskingCameraAccessSupported {
-                session.isMultitaskingCameraAccessEnabled = true
-                print("[CameraProvider] Multitasking camera access enabled")
-            } else {
-                print("[CameraProvider] Multitasking camera access not supported")
-            }
-        }
-        
-        // Get the back camera
-        guard let camera = AVCaptureDevice.default(.builtInWideAngleCamera, for: .video, position: .back) else {
-            showError("未找到相机")
-            return
-        }
-        
-        do {
-            let input = try AVCaptureDeviceInput(device: camera)
-            if session.canAddInput(input) {
-                session.addInput(input)
-            }
-        } catch {
-            showError("相机初始化失败")
-            print("[CameraProvider] Error: \(error)")
-            return
-        }
-        
-        self.captureSession = session
-        
-        // Create and add preview layer
-        let preview = AVCaptureVideoPreviewLayer(session: session)
-        preview.videoGravity = .resizeAspectFill
-        preview.frame = contentView.bounds
-        
-        // Set video orientation
-        if let connection = preview.connection {
-            if connection.isVideoRotationAngleSupported(90) {
-                connection.videoRotationAngle = 90
-            }
-        }
-        
-        contentView.layer.insertSublayer(preview, at: 0)
-        self.previewLayer = preview
-        
+
         // Hide placeholder
         placeholderLabel.isHidden = true
-        
-        // Setup interruption handling
-        setupInterruptionHandling(for: session)
-        
+
+        // Create hardware renderer
+        renderer = CameraHardwareRenderer(displayLayer: displayLayer)
+
         // Setup app lifecycle handling
-        setupAppLifecycleHandling(for: session)
-        
-        // Start capture session on background thread
-        DispatchQueue.global(qos: .userInitiated).async {
-            session.startRunning()
-            print("[CameraProvider] Camera session started")
-        }
-    }
-    
-    /// Setup notification handlers for capture session interruption
-    private func setupInterruptionHandling(for session: AVCaptureSession) {
-        interruptionObserver = NotificationCenter.default.addObserver(
-            forName: AVCaptureSession.wasInterruptedNotification,
-            object: session,
-            queue: .main
-        ) { notification in
-            if let reason = notification.userInfo?[AVCaptureSessionInterruptionReasonKey] as? Int,
-               let interruptionReason = AVCaptureSession.InterruptionReason(rawValue: reason) {
-                print("[CameraProvider] Session interrupted: \(interruptionReason.rawValue)")
-            } else {
-                print("[CameraProvider] Session interrupted (unknown reason)")
-            }
-        }
-        
-        let capturedSession = session
-        interruptionEndedObserver = NotificationCenter.default.addObserver(
-            forName: AVCaptureSession.interruptionEndedNotification,
-            object: session,
-            queue: .main
-        ) { [weak self] _ in
-            print("[CameraProvider] Session interruption ended")
-            Task { @MainActor in
-                guard let self = self, self.isRunning else { return }
-                if !capturedSession.isRunning {
-                    DispatchQueue.global(qos: .userInitiated).async {
-                        capturedSession.startRunning()
-                        print("[CameraProvider] Session resumed")
-                    }
-                }
-            }
-        }
+        setupAppLifecycleHandling()
+
+        // Start renderer
+        renderer?.start()
     }
     
     /// Setup app lifecycle handling to resume camera when returning to foreground
-    private func setupAppLifecycleHandling(for session: AVCaptureSession) {
-        let capturedSession = session
+    private func setupAppLifecycleHandling() {
         appDidBecomeActiveObserver = NotificationCenter.default.addObserver(
             forName: UIApplication.didBecomeActiveNotification,
             object: nil,
@@ -269,13 +173,7 @@ final class CameraProvider: NSObject, PiPContentProvider {
         ) { [weak self] _ in
             Task { @MainActor in
                 guard let self = self, self.isRunning else { return }
-                print("[CameraProvider] App became active, checking session...")
-                if !capturedSession.isRunning {
-                    DispatchQueue.global(qos: .userInitiated).async {
-                        capturedSession.startRunning()
-                        print("[CameraProvider] Session restarted on app active")
-                    }
-                }
+                print("[CameraProvider] App became active")
             }
         }
     }
@@ -296,30 +194,25 @@ final class CameraProvider: NSObject, PiPContentProvider {
         }
     }
     
-    // Called when contentView's bounds change
-    func updatePreviewLayerFrame() {
-        previewLayer?.frame = contentView.bounds
-    }
-    
-    /// Returns the preview layer for external frame updates
-    var currentPreviewLayer: AVCaptureVideoPreviewLayer? {
-        previewLayer
-    }
-    
     // MARK: - Celebration
     
     private func setupCelebrationObserver() {
         print("[CameraProvider] Setting up celebration observer")
         
+        // 先清除旧订阅，防止重复
+        cancellables.removeAll()
+        
         // Subscribe to away interval completion
-        // Using dropFirst to ignore initial nil value
         DisplayTimeTracker.shared.$lastCompletedAwayInterval
-            .dropFirst()  // Skip initial nil
             .compactMap { $0 }
             .receive(on: DispatchQueue.main)
             .sink { [weak self] interval in
+                guard let self = self else { return }
+                // 防止对同一个 interval 重复触发庆祝
+                guard self.lastCelebratedIntervalId != interval.id else { return }
+                self.lastCelebratedIntervalId = interval.id
                 print("[CameraProvider] Received away interval: \(interval.duration) seconds")
-                self?.showCelebration(duration: interval.duration)
+                self.showCelebration(duration: interval.duration)
             }
             .store(in: &cancellables)
         
@@ -332,8 +225,8 @@ final class CameraProvider: NSObject, PiPContentProvider {
         
         print("[CameraProvider] Showing celebration for \(Int(duration)) seconds away")
         
-        // Hide camera preview layer during celebration
-        previewLayer?.isHidden = true
+        // Hide display layer during celebration
+        displayLayer.isHidden = true
         placeholderLabel.isHidden = true
         
         // Create and show celebration view
@@ -361,8 +254,8 @@ final class CameraProvider: NSObject, PiPContentProvider {
         celebrationView = nil
         isCelebrating = false
         
-        // Show camera preview again
-        previewLayer?.isHidden = false
+        // Show display layer again
+        displayLayer.isHidden = false
         
         // Restore frame rate (CameraProvider already uses 30fps)
         DisplayTimeTracker.shared.clearLastAwayInterval()
@@ -371,21 +264,3 @@ final class CameraProvider: NSObject, PiPContentProvider {
     }
 }
 
-// MARK: - CameraContainerView
-
-/// A custom UIView that automatically updates its preview layer frame when bounds change.
-private class CameraContainerView: UIView {
-    
-    override func layoutSubviews() {
-        super.layoutSubviews()
-        
-        // Update all CALayer sublayers that are AVCaptureVideoPreviewLayer
-        if let sublayers = layer.sublayers {
-            for sublayer in sublayers {
-                if let previewLayer = sublayer as? AVCaptureVideoPreviewLayer {
-                    previewLayer.frame = bounds
-                }
-            }
-        }
-    }
-}

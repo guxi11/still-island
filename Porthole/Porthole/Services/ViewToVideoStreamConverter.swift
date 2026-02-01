@@ -51,8 +51,11 @@ final class ViewToVideoStreamConverter {
     // Screen state detection
     private var lastDisplayLinkTimestamp: CFTimeInterval = 0
     private var isScreenOff = false
-    /// Threshold in seconds to consider screen as off (no display link for this long)
-    private let screenOffThreshold: CFTimeInterval = 0.5
+    /// 动态计算的屏幕关闭检测阈值（基于当前帧率）
+    private var screenOffThreshold: CFTimeInterval {
+        // 阈值设为帧间隔的3倍，最小5秒，避免低帧率时误判
+        return max(5.0, frameInterval * 3.0)
+    }
     
     // MARK: - Initialization
     
@@ -146,6 +149,16 @@ final class ViewToVideoStreamConverter {
         }
         
         displayLink = CADisplayLink(target: self, selector: #selector(displayLinkFired))
+        // 使用系统级帧率控制，减少CPU唤醒次数
+        if #available(iOS 15.0, *) {
+            displayLink?.preferredFrameRateRange = CAFrameRateRange(
+                minimum: Float(targetFrameRate),
+                maximum: Float(targetFrameRate),
+                preferred: Float(targetFrameRate)
+            )
+        } else {
+            displayLink?.preferredFramesPerSecond = targetFrameRate
+        }
         displayLink?.add(to: .main, forMode: .common)
         
         // Start screen off detection timer
@@ -160,6 +173,19 @@ final class ViewToVideoStreamConverter {
     func setFrameRate(_ frameRate: Int) {
         targetFrameRate = max(1, min(60, frameRate))
         frameInterval = 1.0 / Double(targetFrameRate)
+        
+        // 同步更新CADisplayLink的帧率设置
+        if let displayLink = displayLink {
+            if #available(iOS 15.0, *) {
+                displayLink.preferredFrameRateRange = CAFrameRateRange(
+                    minimum: Float(targetFrameRate),
+                    maximum: Float(targetFrameRate),
+                    preferred: Float(targetFrameRate)
+                )
+            } else {
+                displayLink.preferredFramesPerSecond = targetFrameRate
+            }
+        }
         print("[Converter] Frame rate updated to \(targetFrameRate) FPS")
     }
     

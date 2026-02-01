@@ -21,7 +21,7 @@ final class CatCompanionProvider: PiPContentProvider {
     // MARK: - PiPContentProvider
 
     let contentView: UIView // This will hold our SKView
-    let preferredFrameRate: Int = 30 // Higher frame rate for smooth SpriteKit animation
+    let preferredFrameRate: Int = 10 // 降低帧率，SpriteKit动画效果timePerFrame=0.15（约7fps）
 
     // MARK: - Private Properties
 
@@ -39,6 +39,8 @@ final class CatCompanionProvider: PiPContentProvider {
         skView = SKView(frame: CGRect(origin: .zero, size: containerSize))
         skView.backgroundColor = .white
         skView.ignoresSiblingOrder = true
+        // 降低SKView帧率以节省电量，配合SpriteKit动画的有效帧率
+        skView.preferredFramesPerSecond = 10
         // skView.showsFPS = true // Debug
 
         // Setup Scene

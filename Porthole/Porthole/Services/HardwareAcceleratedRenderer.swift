@@ -34,6 +34,8 @@ final class VideoHardwareRenderer: HardwareAcceleratedRenderer {
     private var playerItem: AVPlayerItem?
     private var videoOutput: AVPlayerItemVideoOutput?
     private var displayLink: CADisplayLink?
+    private var loopObserver: NSObjectProtocol?
+    private var frameCount = 0
     
     init(videoURL: URL, displayLayer: AVSampleBufferDisplayLayer) {
         self.videoURL = videoURL
@@ -43,6 +45,7 @@ final class VideoHardwareRenderer: HardwareAcceleratedRenderer {
     
     private func setupDisplayLayer() {
         displayLayer.videoGravity = .resizeAspectFill
+        displayLayer.backgroundColor = UIColor.black.cgColor
         
         var timebase: CMTimebase?
         CMTimebaseCreateWithSourceClock(
@@ -58,11 +61,11 @@ final class VideoHardwareRenderer: HardwareAcceleratedRenderer {
     }
     
     func start() {
-        // Create player item with video output
+        // Create player item
         let asset = AVAsset(url: videoURL)
         playerItem = AVPlayerItem(asset: asset)
         
-        // Configure video output for pixel buffer access
+        // Configure video output - don't restrict dimensions, let AVFoundation handle it
         let outputSettings: [String: Any] = [
             kCVPixelBufferPixelFormatTypeKey as String: kCVPixelFormatType_32BGRA
         ]
@@ -71,29 +74,39 @@ final class VideoHardwareRenderer: HardwareAcceleratedRenderer {
         
         // Create player
         player = AVPlayer(playerItem: playerItem)
-        player?.actionAtItemEnd = .none // Handle looping manually
+        player?.actionAtItemEnd = .none
         
         // Setup looping
-        NotificationCenter.default.addObserver(
+        loopObserver = NotificationCenter.default.addObserver(
             forName: .AVPlayerItemDidPlayToEndTime,
             object: playerItem,
             queue: .main
         ) { [weak self] _ in
-            self?.player?.seek(to: .zero)
-            self?.player?.play()
+            self?.player?.seek(to: .zero) { finished in
+                if finished {
+                    self?.player?.play()
+                }
+            }
         }
         
-        // Start display link to copy frames
+        // Start display link at 15fps
         displayLink = CADisplayLink(target: self, selector: #selector(displayLinkFired))
+        displayLink?.preferredFramesPerSecond = 15
         displayLink?.add(to: .main, forMode: .common)
         
         player?.play()
-        print("[VideoHardwareRenderer] Started with hardware decoder")
+        print("[VideoHardwareRenderer] Started")
     }
     
     func stop() {
         displayLink?.invalidate()
         displayLink = nil
+        
+        if let observer = loopObserver {
+            NotificationCenter.default.removeObserver(observer)
+            loopObserver = nil
+        }
+        
         player?.pause()
         player = nil
         playerItem = nil
@@ -112,15 +125,25 @@ final class VideoHardwareRenderer: HardwareAcceleratedRenderer {
             return
         }
         
-        // Create sample buffer from hardware-decoded pixel buffer
-        guard let sampleBuffer = createSampleBuffer(from: pixelBuffer, presentationTime: currentTime) else {
+        // Create sample buffer using host time (critical for AVSampleBufferDisplayLayer)
+        guard let sampleBuffer = createSampleBuffer(from: pixelBuffer) else {
             return
         }
         
+        // Check layer status and flush if failed
+        if displayLayer.status == .failed {
+            displayLayer.flush()
+        }
+        
         displayLayer.enqueue(sampleBuffer)
+        
+        frameCount += 1
+        if frameCount == 1 || frameCount % 60 == 0 {
+            print("[VideoHardwareRenderer] Frame \(frameCount), layer status: \(displayLayer.status.rawValue)")
+        }
     }
     
-    private func createSampleBuffer(from pixelBuffer: CVPixelBuffer, presentationTime: CMTime) -> CMSampleBuffer? {
+    private func createSampleBuffer(from pixelBuffer: CVPixelBuffer) -> CMSampleBuffer? {
         var formatDesc: CMVideoFormatDescription?
         CMVideoFormatDescriptionCreateForImageBuffer(
             allocator: kCFAllocatorDefault,
@@ -129,9 +152,11 @@ final class VideoHardwareRenderer: HardwareAcceleratedRenderer {
         )
         guard let formatDesc = formatDesc else { return nil }
         
+        // Use host time for presentation timestamp - this is critical
+        let hostTime = CMClockGetTime(CMClockGetHostTimeClock())
         var timingInfo = CMSampleTimingInfo(
-            duration: CMTime(value: 1, timescale: 30),
-            presentationTimeStamp: presentationTime,
+            duration: CMTime(value: 1, timescale: 15),
+            presentationTimeStamp: hostTime,
             decodeTimeStamp: .invalid
         )
         
@@ -181,7 +206,8 @@ final class CameraHardwareRenderer: NSObject, HardwareAcceleratedRenderer, AVCap
     
     func start() {
         let session = AVCaptureSession()
-        session.sessionPreset = .medium // Balance quality/performance
+        // Use low preset for better performance (480p)
+        session.sessionPreset = .low
         
         // Enable multitasking for background operation
         if #available(iOS 16.0, *) {
@@ -198,12 +224,26 @@ final class CameraHardwareRenderer: NSObject, HardwareAcceleratedRenderer, AVCap
             return
         }
         
+        // Configure camera for lower frame rate (15fps)
+        do {
+            try camera.lockForConfiguration()
+            camera.activeVideoMinFrameDuration = CMTime(value: 1, timescale: 15)
+            camera.activeVideoMaxFrameDuration = CMTime(value: 1, timescale: 15)
+            camera.unlockForConfiguration()
+            print("[CameraHardwareRenderer] Camera configured: 15fps, low preset")
+        } catch {
+            print("[CameraHardwareRenderer] Failed to configure camera frame rate: \(error)")
+        }
+        
         session.addInput(input)
         
         // Add video data output for direct pixel buffer access
         let videoOutput = AVCaptureVideoDataOutput()
+        // Reduce resolution by setting max dimensions
         videoOutput.videoSettings = [
-            kCVPixelBufferPixelFormatTypeKey as String: kCVPixelFormatType_32BGRA
+            kCVPixelBufferPixelFormatTypeKey as String: kCVPixelFormatType_32BGRA,
+            kCVPixelBufferWidthKey as String: 480,
+            kCVPixelBufferHeightKey as String: 360
         ]
         videoOutput.setSampleBufferDelegate(self, queue: outputQueue)
         
@@ -233,7 +273,7 @@ final class CameraHardwareRenderer: NSObject, HardwareAcceleratedRenderer, AVCap
     
     // AVCaptureVideoDataOutputSampleBufferDelegate
     func captureOutput(_ output: AVCaptureOutput, didOutput sampleBuffer: CMSampleBuffer, from connection: AVCaptureConnection) {
-        // Sample buffer is already hardware-ready, just enqueue directly
+        // Enqueue sample buffer directly to display layer
         displayLayer.enqueue(sampleBuffer)
     }
 }
