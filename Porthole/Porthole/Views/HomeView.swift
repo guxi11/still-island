@@ -91,43 +91,81 @@ struct HomeView: View {
                             }
                     )
                 
-                // 卡片轮播
-                if !cardManager.cards.isEmpty && !inCorner {
+                // 所有卡片 - 统一渲染，通过位置变化实现动画
+                if !cardManager.cards.isEmpty {
                     ForEach(Array(cardManager.cards.enumerated()), id: \.element.id) { index, card in
-                        let offset = CGFloat(index - currentCardIndex) * (cardWidth + cardSpacing)
                         let isCurrent = index == currentCardIndex
+                        
+                        // 计算位置
+                        let baseOffset = CGFloat(index - currentCardIndex) * (cardWidth + cardSpacing)
+                        
+                        // 当前卡片的目标位置和缩放
+                        let targetX: CGFloat = {
+                            if isCurrent && inCorner {
+                                // 在角落时，支持下滑拖动
+                                if dragOffset.height > 0 {
+                                    let progress = min(dragOffset.height / 200, 1.0)
+                                    return cornerX + (centerX - cornerX) * progress
+                                }
+                                return cornerX
+                            }
+                            return centerX + baseOffset + dragOffset.width
+                        }()
+                        
+                        let targetY: CGFloat = {
+                            if isCurrent && inCorner {
+                                // 在角落时，支持下滑拖动
+                                if dragOffset.height > 0 {
+                                    let progress = min(dragOffset.height / 200, 1.0)
+                                    return cornerY + (centerY - cornerY) * progress
+                                }
+                                return cornerY
+                            }
+                            // 普通状态下滑显示编辑面板
+                            if isCurrent && dragOffset.height > 0 {
+                                return centerY + min(dragOffset.height * 0.3, 50)
+                            }
+                            return centerY
+                        }()
+                        
+                        let targetScale: CGFloat = {
+                            if isCurrent && inCorner {
+                                if dragOffset.height > 0 {
+                                    let progress = min(dragOffset.height / 200, 1.0)
+                                    return miniScale + (1.0 - miniScale) * progress
+                                }
+                                return miniScale
+                            }
+                            return isCurrent ? 1.0 : 0.85
+                        }()
+                        
+                        let targetOpacity: Double = {
+                            if inCorner {
+                                if !isCurrent { return 0 }
+                                if pipManager.isPiPActive && !pipManager.isPreparingPiP && dragOffset.height == 0 {
+                                    return 0.15
+                                }
+                                return 1.0
+                            }
+                            if abs(index - currentCardIndex) > 2 { return 0 }
+                            return isCurrent ? 1.0 : 0.55
+                        }()
                         
                         CardItemView(
                             card: card,
                             cardWidth: cardWidth,
                             cardHeight: cardHeight,
                             isCurrentCard: isCurrent,
-                            isPiPActive: false,
-                            isPreparing: false
+                            isPiPActive: pipManager.isPiPActive && isCurrent,
+                            isPreparing: pipManager.isPreparingPiP && isCurrent
                         )
-                        .scaleEffect(isCurrent ? 1.0 : 0.85)
-                        .position(x: centerX + offset + dragOffset.width, y: centerY)
-                        .opacity(abs(index - currentCardIndex) > 2 ? 0 : (isCurrent ? 1.0 : 0.55))
+                        .scaleEffect(targetScale)
+                        .position(x: targetX, y: targetY)
+                        .opacity(targetOpacity)
                         .zIndex(isCurrent ? 10 : Double(cardManager.cards.count - abs(index - currentCardIndex)))
+                        .animation(.spring(response: 0.5, dampingFraction: 0.8), value: inCorner)
+                        .animation(.interpolatingSpring(stiffness: 300, damping: 30), value: currentCardIndex)
                     }
-                    .animation(.interpolatingSpring(stiffness: 300, damping: 30), value: currentCardIndex)
-                    .animation(.interpolatingSpring(stiffness: 300, damping: 30), value: dragOffset.width)
-                }
-                
-                // 当前卡片飞到角落时显示
-                if let card = currentCard, inCorner {
-                    CardItemView(
-                        card: card,
-                        cardWidth: cardWidth,
-                        cardHeight: cardHeight,
-                        isCurrentCard: true,
-                        isPiPActive: pipManager.isPiPActive,
-                        isPreparing: pipManager.isPreparingPiP
-                    )
-                    .scaleEffect(miniScale)
-                    .position(x: cornerX, y: cornerY)
-                    .opacity(pipManager.isPiPActive && !pipManager.isPreparingPiP ? 0.15 : 1.0)
-                    .id(pipViewId)
                 }
                 
                 // Hidden PiP host view
@@ -164,7 +202,6 @@ struct HomeView: View {
                         .transition(.opacity)
                 }
             }
-            .animation(.spring(response: 0.5, dampingFraction: 0.8), value: inCorner)
         }
         .onAppear {
             syncCardIndex()
