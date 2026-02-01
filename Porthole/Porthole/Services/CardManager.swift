@@ -100,25 +100,43 @@ final class CardManager: ObservableObject {
         return config
     }
 
-    /// Adds a new card instance
+    /// Adds a new card instance at the end
     func addCard(providerType: PiPProviderType, configuration: VideoCardConfiguration? = nil) {
-        guard let context = modelContext else { return }
+        addCard(providerType: providerType, afterIndex: cards.count - 1, configuration: configuration)
+    }
+    
+    /// Adds a new card instance after a specific index
+    /// - Parameters:
+    ///   - providerType: The type of provider for the new card
+    ///   - afterIndex: Insert after this index (-1 to insert at beginning)
+    ///   - configuration: Optional configuration data
+    /// - Returns: The index of the newly inserted card, or nil if failed
+    @discardableResult
+    func addCard(providerType: PiPProviderType, afterIndex: Int, configuration: VideoCardConfiguration? = nil) -> Int? {
+        guard let context = modelContext else { return nil }
 
         // Check if unique card already exists
         if !providerType.allowsMultipleInstances {
             if cards.contains(where: { $0.providerTypeRaw == providerType.rawValue }) {
                 print("[CardManager] Card of type \(providerType.rawValue) already exists")
-                return
+                return nil
             }
         }
 
-        let newOrder = (cards.map(\.displayOrder).max() ?? -1) + 1
-        let card = CardInstance(providerType: providerType, displayOrder: newOrder, configuration: configuration)
+        let insertIndex = afterIndex + 1
+        
+        // Shift all cards after insertIndex
+        for card in cards where card.displayOrder >= insertIndex {
+            card.displayOrder += 1
+        }
+        
+        let card = CardInstance(providerType: providerType, displayOrder: insertIndex, configuration: configuration)
         context.insert(card)
 
         save()
         loadCards()
-        print("[CardManager] Added card: \(providerType.rawValue)")
+        print("[CardManager] Added card: \(providerType.rawValue) at index \(insertIndex)")
+        return insertIndex
     }
 
     /// Removes a card by ID

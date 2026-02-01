@@ -12,7 +12,9 @@ struct ContentView: View {
     @StateObject private var pipManager = PiPManager.shared
     
     var body: some View {
-        HomeView()
+        NavigationStack {
+            HomeView()
+        }
     }
 }
 
