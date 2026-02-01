@@ -8,6 +8,7 @@ struct HomeView: View {
     @State private var viewState: HomeViewState = .main
     @State private var dragOffset: CGFloat = 0
     @State private var wasPiPActive = false
+    @State private var isDraggingHorizontally: Bool? = nil // nil = not determined, true = horizontal, false = vertical
     
     // Deep blue background color matching the Porthole theme
     private let backgroundColor = Color(red: 10/255, green: 24/255, blue: 48/255)
@@ -81,8 +82,19 @@ struct HomeView: View {
                     .offset(x: sidebarOffset(sidebarWidth: sidebarWidth))
                 }
                 .gesture(
-                    DragGesture()
+                    DragGesture(minimumDistance: 20)
                         .onChanged { value in
+                            let horizontalDistance = abs(value.translation.width)
+                            let verticalDistance = abs(value.translation.height)
+                            
+                            // Determine direction on first significant movement
+                            if isDraggingHorizontally == nil && (horizontalDistance > 15 || verticalDistance > 15) {
+                                isDraggingHorizontally = horizontalDistance > verticalDistance * 1.5
+                            }
+                            
+                            // Only process horizontal drags
+                            guard isDraggingHorizontally == true else { return }
+                            
                             let translation = value.translation.width
                             
                             switch viewState {
@@ -97,7 +109,16 @@ struct HomeView: View {
                             }
                         }
                         .onEnded { value in
-                            let threshold: CGFloat = 50
+                            defer {
+                                // Always reset drag state
+                                dragOffset = 0
+                                isDraggingHorizontally = nil
+                            }
+                            
+                            // Only process if this was a horizontal drag
+                            guard isDraggingHorizontally == true else { return }
+                            
+                            let threshold: CGFloat = 80 // Increased threshold to prevent accidental triggers
                             let translation = value.translation.width
                             
                             withAnimation(.spring()) {
@@ -111,7 +132,6 @@ struct HomeView: View {
                                         viewState = .main
                                     }
                                 }
-                                dragOffset = 0
                             }
                         }
                 )
