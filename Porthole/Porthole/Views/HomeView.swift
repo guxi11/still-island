@@ -64,15 +64,15 @@ struct HomeView: View {
             let cardWidth: CGFloat = 260
             let cardHeight: CGFloat = 150
             let cardSpacing: CGFloat = 28
-            let miniScale: CGFloat = 0.28
+            let miniScale: CGFloat = 0.25
             
             // 中心位置
             let centerX = screenSize.width / 2
             let centerY = screenSize.height / 2 - 20
             
-            // 左上角位置（缩小后的卡片中心点）
-            let cornerX: CGFloat = 20 + (cardWidth * miniScale) / 2
-            let cornerY: CGFloat = safeArea.top + 10 + (cardHeight * miniScale) / 2
+            // 左上角位置（缩小后的卡片中心点）- 更靠近角落
+            let cornerX: CGFloat = 30 + (cardWidth * miniScale) / 2
+            let cornerY: CGFloat = 16 + (cardHeight * miniScale) / 2
             
             // 是否在角落
             let inCorner = pipManager.isPiPActive || pipManager.isPreparingPiP
@@ -168,7 +168,7 @@ struct HomeView: View {
                     }
                 }
                 
-                // Hidden PiP host view
+                // PiP host view - 放在卡片飞行终点位置
                 if (pipManager.isPreparingPiP || pipManager.isPiPActive), let layer = pipManager.displayLayer {
                     PiPHostView(
                         displayLayer: layer,
@@ -176,7 +176,8 @@ struct HomeView: View {
                             pipManager.bindToViewLayer(view)
                         }
                     )
-                    .frame(width: 1, height: 1)
+                    .frame(width: cardWidth * miniScale, height: cardHeight * miniScale)
+                    .position(x: cornerX, y: cornerY)
                     .opacity(0.01)
                 }
                 
