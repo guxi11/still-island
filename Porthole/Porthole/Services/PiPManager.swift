@@ -67,6 +67,9 @@ final class PiPManager: NSObject, ObservableObject {
 
     // Timer for updating content
     private var updateTimer: Timer?
+    
+    // 准备超时任务
+    private var prepareTimeoutTask: Task<Void, Never>?
 
     // MARK: - Initialization
 
@@ -134,6 +137,19 @@ final class PiPManager: NSObject, ObservableObject {
         }
 
         isPreparingPiP = true
+        
+        // 设置准备超时（5秒）
+        prepareTimeoutTask?.cancel()
+        prepareTimeoutTask = Task { [weak self] in
+            try? await Task.sleep(nanoseconds: 5_000_000_000)
+            guard !Task.isCancelled else { return }
+            await MainActor.run {
+                if self?.isPreparingPiP == true && self?.isPiPActive == false {
+                    print("[PiPManager] Prepare timeout, cancelling...")
+                    self?.stopPiP()
+                }
+            }
+        }
 
         // Store provider
         currentProvider = provider
@@ -381,6 +397,10 @@ final class PiPManager: NSObject, ObservableObject {
     /// Stops the current PiP session.
     func stopPiP() {
         print("[PiPManager] stopPiP called")
+        
+        // 取消准备超时任务
+        prepareTimeoutTask?.cancel()
+        prepareTimeoutTask = nil
 
         // Cancel KVO observation first
         pipPossibleObservation?.invalidate()
@@ -424,6 +444,28 @@ final class PiPManager: NSObject, ObservableObject {
         isDirectVideoProvider = false
 
         print("[PiPManager] stopPiP completed")
+    }
+
+    /// 取消 PiP 准备（上滑取消时调用）
+    func cancelPrepare() {
+        guard isPreparingPiP && !isPiPActive else { return }
+        print("[PiPManager] cancelPrepare called")
+        stopPiP()
+    }
+    
+    /// 确认启动 PiP（上滑成功时调用，如果已经准备好就启动）
+    func confirmStartPiP() {
+        guard isPreparingPiP else { return }
+        print("[PiPManager] confirmStartPiP called")
+        
+        // 如果 controller 已经存在且可用，立即启动
+        if let controller = pipController, controller.isPictureInPicturePossible {
+            print("[PiPManager] Starting PiP immediately")
+            controller.startPictureInPicture()
+        } else {
+            // 等待 controller 准备好（KVO 会自动触发启动）
+            print("[PiPManager] Waiting for PiP to become possible...")
+        }
     }
 
     /// Toggles pause/play state for the PiP content.
@@ -483,6 +525,10 @@ extension PiPManager: AVPictureInPictureControllerDelegate {
 
     nonisolated func pictureInPictureControllerDidStartPictureInPicture(_ pictureInPictureController: AVPictureInPictureController) {
         Task { @MainActor in
+            // 取消准备超时任务
+            self.prepareTimeoutTask?.cancel()
+            self.prepareTimeoutTask = nil
+            
             self.isPiPActive = true
             self.isPreparingPiP = false
             self.errorMessage = nil

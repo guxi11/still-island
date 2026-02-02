@@ -44,6 +44,8 @@ struct HomeView: View {
     @State private var showAddCard = false
     @State private var showVideoPicker = false
     @State private var editingCardId: UUID?
+    @State private var showStatistics = false
+    @State private var showPrivacyPolicy = false
     
     // Warm cream/milk white background
     private let backgroundColor = Color(red: 250/255, green: 247/255, blue: 240/255)
@@ -82,8 +84,8 @@ struct HomeView: View {
             let cornerX: CGFloat = 30 + (cardWidth * miniScale) / 2
             let cornerY: CGFloat = 16 + (cardHeight * miniScale) / 2
             
-            // 是否在角落
-            let inCorner = pipManager.isPiPActive || pipManager.isPreparingPiP
+            // 是否在角落（只有在非上滑手势过程中才生效）
+            let inCorner = (pipManager.isPiPActive || pipManager.isPreparingPiP) && cardSwipeState != .swipingUp
             
             ZStack {
                 // Background
@@ -212,7 +214,7 @@ struct HomeView: View {
                 // 计算上滑进度（用于统计数据和提示的动画）
                 let swipeUpProgress: CGFloat = {
                     if inCorner { return 1.0 }
-                    if dragOffset.height < 0 && cardSwipeState != .swipingDown {
+                    if dragOffset.height < 0 && cardSwipeState == .swipingUp {
                         return min(abs(dragOffset.height) / 150, 1.0)
                     }
                     return 0
@@ -227,7 +229,7 @@ struct HomeView: View {
                 }()
                 
                 // Statistics overlay with handle - 随上滑动作入场，下滑出场
-                if pipManager.isPiPActive || swipeUpProgress > 0 {
+                if pipManager.isPiPActive || pipManager.isPreparingPiP || swipeUpProgress > 0 {
                     let effectiveProgress = swipeUpProgress * (1 - swipeDownProgress)
                     
                     VStack(spacing: 0) {
@@ -289,6 +291,20 @@ struct HomeView: View {
             VideoPickerView(isPresented: $showVideoPicker) { url in
                 handleVideoPicked(url)
             }
+        }
+        .sheet(isPresented: $showStatistics) {
+            NavigationStack {
+                StatisticsView()
+            }
+            .presentationDetents([.fraction(0.8)])
+            .presentationDragIndicator(.visible)
+        }
+        .sheet(isPresented: $showPrivacyPolicy) {
+            NavigationStack {
+                PrivacyPolicyView()
+            }
+            .presentationDetents([.fraction(0.8)])
+            .presentationDragIndicator(.visible)
         }
     }
     
@@ -380,9 +396,9 @@ struct HomeView: View {
     
     private var quickLinksSection: some View {
         HStack(spacing: 12) {
-            // Statistics link
-            NavigationLink {
-                StatisticsView()
+            // Statistics button
+            Button {
+                showStatistics = true
             } label: {
                 HStack(spacing: 6) {
                     Image(systemName: "chart.bar")
@@ -397,9 +413,9 @@ struct HomeView: View {
                 .cornerRadius(10)
             }
             
-            // Privacy policy link
-            NavigationLink {
-                PrivacyPolicyView()
+            // Privacy policy button
+            Button {
+                showPrivacyPolicy = true
             } label: {
                 HStack(spacing: 6) {
                     Image(systemName: "hand.raised")
@@ -566,12 +582,15 @@ struct HomeView: View {
         // Determine drag direction on first significant movement
         if dragDirection == nil && (horizontalDistance > 15 || verticalDistance > 15) {
             dragDirection = horizontalDistance > verticalDistance ? .horizontal : .vertical
-            
-            // 设置滑动状态
-            if dragDirection == .vertical && !pipManager.isPiPActive {
+
+            // 设置滑动状态（只在 PiP 未激活且未准备中时处理）
+            if dragDirection == .vertical && !pipManager.isPiPActive && !pipManager.isPreparingPiP {
                 if translation.height < 0 {
                     cardSwipeState = .swipingUp
+                    // 上滑开始时立即准备 PiP
+                    preparePiPEarly()
                 } else if translation.height > 0 && cardSwipeState == .idle {
+                    // 只有在完全空闲状态才允许进入下滑编辑模式
                     cardSwipeState = .swipingDown
                 }
             }
@@ -587,53 +606,52 @@ struct HomeView: View {
             }
             
         case .vertical:
-            if !pipManager.isPiPActive {
+            if !pipManager.isPiPActive && !pipManager.isPreparingPiP {
                 // 根据滑动状态决定是否允许
                 if cardSwipeState == .swipingUp {
                     // 上滑状态：只允许上滑
-                    dragOffset = CGSize(width: 0, height: min(translation.height, 0))
+                    let clampedHeight = min(translation.height, 0)
+                    dragOffset = CGSize(width: 0, height: clampedHeight)
                 } else if cardSwipeState == .swipingDown {
-                    // 下滑状态：只允许下滑
+                    // 下滑状态：只允许下滑（编辑模式）
                     dragOffset = CGSize(width: 0, height: max(translation.height, 0))
                 } else {
                     dragOffset = CGSize(width: 0, height: translation.height)
                 }
-            } else {
-                // Only allow downward drag to close PiP
+            } else if pipManager.isPiPActive {
+                // PiP 激活时：只允许下滑关闭 PiP
                 if translation.height > 0 {
                     dragOffset = CGSize(width: 0, height: translation.height)
                 }
             }
+            // PiP 准备中时：不处理任何拖动（让卡片飞行动画完成）
         }
     }
     
     private func handleDragEnded(_ value: DragGesture.Value, screenSize: CGSize) {
         // Don't handle gestures when edit panel is open
         guard !showEditPanel else { return }
-        
+
         let translation = value.translation
         let velocity = value.velocity
-        
-        defer {
+
+        guard let direction = dragDirection else {
+            // 如果没有方向，直接重置
             withAnimation(.interpolatingSpring(stiffness: 300, damping: 30)) {
                 dragOffset = .zero
             }
             dragDirection = nil
-            // 重置滑动状态
-            if !pipManager.isPiPActive && !pipManager.isPreparingPiP {
-                cardSwipeState = .idle
-            }
+            cardSwipeState = .idle
+            return
         }
-        
-        guard let direction = dragDirection else { return }
-        
+
         switch direction {
         case .horizontal:
             // Switch cards with smooth animation
             if !pipManager.isPiPActive && cardManager.cards.count > 1 {
                 let threshold: CGFloat = screenSize.width * 0.15
                 let velocityThreshold: CGFloat = 400
-                
+
                 withAnimation(.interpolatingSpring(stiffness: 300, damping: 30)) {
                     if translation.width < -threshold || velocity.width < -velocityThreshold {
                         currentCardIndex = min(currentCardIndex + 1, cardManager.cards.count - 1)
@@ -642,26 +660,84 @@ struct HomeView: View {
                     }
                 }
             }
-            
+
+            // 重置状态
+            withAnimation(.interpolatingSpring(stiffness: 300, damping: 30)) {
+                dragOffset = .zero
+            }
+            dragDirection = nil
+            cardSwipeState = .idle
+
         case .vertical:
             let threshold: CGFloat = 80
             let velocityThreshold: CGFloat = 800
-            
-            if !pipManager.isPiPActive {
-                if cardSwipeState == .swipingUp && (translation.height < -threshold || velocity.height < -velocityThreshold) {
-                    // Swipe up to start PiP
-                    startPiP()
+
+            if !pipManager.isPiPActive && !pipManager.isPreparingPiP {
+                if cardSwipeState == .swipingUp {
+                    if translation.height < -threshold || velocity.height < -velocityThreshold {
+                        // 上滑成功 - 立即重置状态，让卡片通过 inCorner 状态跳转到角落
+                        dragOffset = .zero
+                        dragDirection = nil
+
+                        // 先重置状态，让布局计算切换到 inCorner 模式
+                        cardSwipeState = .idle
+
+                        // 然后确认启动 PiP
+                        if pipManager.isPreparingPiP {
+                            // 已经在准备中，确认启动
+                            pipManager.confirmStartPiP()
+                        } else {
+                            // 没有准备（可能是视频卡片没选视频），调用 startPiP 处理
+                            startPiP()
+                        }
+                    } else {
+                        // 上滑取消，取消准备
+                        pipManager.cancelPrepare()
+
+                        // 重置状态
+                        withAnimation(.interpolatingSpring(stiffness: 300, damping: 30)) {
+                            dragOffset = .zero
+                        }
+                        dragDirection = nil
+                        cardSwipeState = .idle
+                    }
                 } else if cardSwipeState == .swipingDown && (translation.height > threshold || velocity.height > velocityThreshold) {
-                    // Swipe down to show edit panel (only if started from idle)
+                    // Swipe down to show edit panel (only if PiP is not active/preparing and started from idle)
                     withAnimation(.spring(response: 0.35, dampingFraction: 0.8)) {
                         showEditPanel = true
                     }
+
+                    // 重置状态
+                    dragOffset = .zero
+                    dragDirection = nil
+                    cardSwipeState = .idle
+                } else {
+                    // 其他情况，重置状态
+                    withAnimation(.interpolatingSpring(stiffness: 300, damping: 30)) {
+                        dragOffset = .zero
+                    }
+                    dragDirection = nil
+                    cardSwipeState = .idle
                 }
-            } else {
-                // Swipe down to close PiP
+            } else if pipManager.isPiPActive {
+                // PiP 激活时：下滑关闭 PiP
                 if translation.height > threshold || velocity.height > velocityThreshold {
                     stopPiP()
                 }
+
+                // 重置状态
+                withAnimation(.interpolatingSpring(stiffness: 300, damping: 30)) {
+                    dragOffset = .zero
+                }
+                dragDirection = nil
+                cardSwipeState = .idle
+            } else {
+                // PiP 准备中：只重置状态，不执行任何操作
+                withAnimation(.interpolatingSpring(stiffness: 300, damping: 30)) {
+                    dragOffset = .zero
+                }
+                dragDirection = nil
+                cardSwipeState = .idle
             }
         }
     }
@@ -693,6 +769,37 @@ struct HomeView: View {
         currentProvider = provider
         
         // 直接启动 PiP
+        pipManager.preparePiP(provider: provider)
+    }
+    
+    /// 提前准备 PiP（在上滑开始时调用）
+    private func preparePiPEarly() {
+        // 避免重复准备
+        guard !pipManager.isPreparingPiP && !pipManager.isPiPActive else { return }
+        
+        guard let card = currentCard,
+              let providerType = card.providerType else {
+            return
+        }
+        
+        // For video provider, check if video is selected
+        if providerType == .video {
+            let config = VideoCardConfiguration.decode(from: card.configurationData)
+            if config?.videoURL == nil {
+                // 没有视频时，需要在上滑成功时弹出选择器
+                return
+            }
+        }
+        
+        print("[HomeView] Early preparing PiP for card: \(card.id)")
+        
+        pipViewId = UUID()
+        cardManager.updateLastOpenedCard(id: card.id)
+        
+        let provider = providerType.createProvider(with: card.configurationData)
+        currentProvider = provider
+        
+        // 提前准备 PiP
         pipManager.preparePiP(provider: provider)
     }
     
