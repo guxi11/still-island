@@ -213,7 +213,11 @@ struct HomeView: View {
                 
                 // 计算上滑进度（用于统计数据和提示的动画）
                 let swipeUpProgress: CGFloat = {
-                    if inCorner { return 1.0 }
+                    // 已经在角落或正在准备：显示完整统计数据
+                    if inCorner || pipManager.isPreparingPiP {
+                        return 1.0
+                    }
+                    // 上滑手势中：跟随手势进度
                     if dragOffset.height < 0 && cardSwipeState == .swipingUp {
                         return min(abs(dragOffset.height) / 150, 1.0)
                     }
@@ -583,14 +587,17 @@ struct HomeView: View {
         if dragDirection == nil && (horizontalDistance > 15 || verticalDistance > 15) {
             dragDirection = horizontalDistance > verticalDistance ? .horizontal : .vertical
 
-            // 设置滑动状态（只在 PiP 未激活且未准备中时处理）
-            if dragDirection == .vertical && !pipManager.isPiPActive && !pipManager.isPreparingPiP {
-                if translation.height < 0 {
+            // 设置滑动状态
+            if dragDirection == .vertical {
+                if translation.height < 0 && !pipManager.isPiPActive {
+                    // 上滑：立即响应，同时开始准备 PiP
                     cardSwipeState = .swipingUp
-                    // 上滑开始时立即准备 PiP
-                    preparePiPEarly()
-                } else if translation.height > 0 && cardSwipeState == .idle {
-                    // 只有在完全空闲状态才允许进入下滑编辑模式
+                    // 上滑开始时立即准备 PiP（只在未准备且未激活时调用）
+                    if !pipManager.isPreparingPiP {
+                        preparePiPEarly()
+                    }
+                } else if translation.height > 0 && !pipManager.isPiPActive && !pipManager.isPreparingPiP && cardSwipeState == .idle {
+                    // 下滑：只有在完全空闲状态才允许进入编辑模式
                     cardSwipeState = .swipingDown
                 }
             }
@@ -600,22 +607,23 @@ struct HomeView: View {
         
         switch direction {
         case .horizontal:
-            // Only allow horizontal drag when PiP is not active
-            if !pipManager.isPiPActive && cardManager.cards.count > 1 {
+            // 禁止在上滑、PiP准备中、PiP激活时的左右滑动
+            if !pipManager.isPiPActive && !pipManager.isPreparingPiP && cardSwipeState != .swipingUp && cardManager.cards.count > 1 {
                 dragOffset = CGSize(width: translation.width, height: 0)
             }
             
         case .vertical:
-            if !pipManager.isPiPActive && !pipManager.isPreparingPiP {
-                // 根据滑动状态决定是否允许
+            if !pipManager.isPiPActive {
+                // PiP 未激活时：处理上滑和下滑
                 if cardSwipeState == .swipingUp {
-                    // 上滑状态：只允许上滑
+                    // 上滑状态：允许上滑（即使在准备中也要跟手）
                     let clampedHeight = min(translation.height, 0)
                     dragOffset = CGSize(width: 0, height: clampedHeight)
-                } else if cardSwipeState == .swipingDown {
-                    // 下滑状态：只允许下滑（编辑模式）
+                } else if cardSwipeState == .swipingDown && !pipManager.isPreparingPiP {
+                    // 下滑状态：只在未准备时允许下滑（编辑模式）
                     dragOffset = CGSize(width: 0, height: max(translation.height, 0))
-                } else {
+                } else if !pipManager.isPreparingPiP {
+                    // 其他情况：未准备时允许自由拖动
                     dragOffset = CGSize(width: 0, height: translation.height)
                 }
             } else if pipManager.isPiPActive {
@@ -624,7 +632,7 @@ struct HomeView: View {
                     dragOffset = CGSize(width: 0, height: translation.height)
                 }
             }
-            // PiP 准备中时：不处理任何拖动（让卡片飞行动画完成）
+            // PiP 准备中且非上滑状态：不处理拖动
         }
     }
     
@@ -648,7 +656,7 @@ struct HomeView: View {
         switch direction {
         case .horizontal:
             // Switch cards with smooth animation
-            if !pipManager.isPiPActive && cardManager.cards.count > 1 {
+            if !pipManager.isPiPActive && !pipManager.isPreparingPiP && cardManager.cards.count > 1 {
                 let threshold: CGFloat = screenSize.width * 0.15
                 let velocityThreshold: CGFloat = 400
 
