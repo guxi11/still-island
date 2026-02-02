@@ -552,6 +552,13 @@ struct HomeView: View {
         // Don't handle gestures when edit panel is open
         guard !showEditPanel else { return }
         
+        // 忽略从屏幕底部边缘开始的手势（避免与系统手势冲突）
+        let startY = value.startLocation.y
+        let bottomSafeZone: CGFloat = 50  // 底部安全区域
+        if startY > screenSize.height - bottomSafeZone {
+            return
+        }
+        
         let translation = value.translation
         let horizontalDistance = abs(translation.width)
         let verticalDistance = abs(translation.height)
@@ -891,32 +898,99 @@ struct RoundedCorner: Shape {
 
 // MARK: - Swipe Indicator Component
 
-/// 上滑/下滑指示器组件
+/// 上滑/下滑指示器组件 - 箭头变形成横杠
 /// progress: 0 = 显示上滑箭头, 1 = 显示横杠
 struct SwipeIndicator: View {
     let progress: CGFloat
     
+    // 使用 easeInOut 曲线让动画更自然
+    private var smoothProgress: CGFloat {
+        // 三次贝塞尔缓动
+        let t = progress
+        return t * t * (3 - 2 * t)
+    }
+    
+    // 文字透明度（前半段快速消失）
+    private var textOpacity: Double {
+        Double(max(0, 1 - progress * 3))
+    }
+    
+    // 文字缩放
+    private var textScale: CGFloat {
+        max(0.5, 1 - progress * 0.5)
+    }
+    
+    // 箭头整体缩放（轻微）
+    private var chevronScale: CGFloat {
+        1 - smoothProgress * 0.1
+    }
+    
     var body: some View {
-        ZStack {
-            // 上滑箭头（progress 小时显示）
-            VStack(spacing: 4) {
-                Image(systemName: "chevron.up")
-                    .font(.system(size: 14, weight: .medium))
-                Text("上滑启动")
-                    .font(.caption2)
+        VStack(spacing: max(2, 6 * (1 - smoothProgress))) {
+            // 使用 Canvas 绘制变形的箭头
+            Canvas { context, size in
+                let centerX = size.width / 2
+                let centerY = size.height / 2
+                
+                // 箭头参数
+                let armLength: CGFloat = 8 + smoothProgress * 10  // 8 -> 18
+                let angle = (1 - smoothProgress) * .pi / 4  // 45° -> 0°
+                let thickness: CGFloat = 2.5
+                let cornerRadius: CGFloat = 1.25
+                
+                // 计算两条线的端点
+                // 左边的线
+                let leftStart = CGPoint(
+                    x: centerX - cos(angle) * armLength,
+                    y: centerY + sin(angle) * armLength * (1 - smoothProgress * 0.5)
+                )
+                let leftEnd = CGPoint(x: centerX, y: centerY)
+                
+                // 右边的线
+                let rightStart = CGPoint(x: centerX, y: centerY)
+                let rightEnd = CGPoint(
+                    x: centerX + cos(angle) * armLength,
+                    y: centerY + sin(angle) * armLength * (1 - smoothProgress * 0.5)
+                )
+                
+                // 绘制路径
+                var path = Path()
+                
+                if smoothProgress < 0.95 {
+                    // 箭头形态：两条线
+                    path.move(to: leftStart)
+                    path.addLine(to: leftEnd)
+                    path.move(to: rightStart)
+                    path.addLine(to: rightEnd)
+                } else {
+                    // 完全变成横杠
+                    let barWidth: CGFloat = 36
+                    path.move(to: CGPoint(x: centerX - barWidth/2, y: centerY))
+                    path.addLine(to: CGPoint(x: centerX + barWidth/2, y: centerY))
+                }
+                
+                context.stroke(
+                    path,
+                    with: .color(.black.opacity(0.3)),
+                    style: StrokeStyle(
+                        lineWidth: thickness,
+                        lineCap: .round,
+                        lineJoin: .round
+                    )
+                )
             }
-            .foregroundStyle(.black.opacity(0.25))
-            .opacity(Double(1 - progress))
-            .scaleEffect(1 - progress * 0.3)
+            .frame(width: 50, height: 16)
+            .scaleEffect(chevronScale)
             
-            // 横杠（progress 大时显示）
-            RoundedRectangle(cornerRadius: 2.5)
-                .fill(Color.black.opacity(0.2))
-                .frame(width: 36, height: 4)
-                .opacity(Double(progress))
-                .scaleEffect(0.7 + progress * 0.3)
+            // 文字（逐渐消失）
+            if textOpacity > 0.01 {
+                Text("上滑启动")
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundStyle(.black.opacity(0.25 * textOpacity))
+                    .scaleEffect(textScale)
+            }
         }
-        .frame(height: 30)
+        .frame(height: 40)
         .allowsHitTesting(false)
     }
 }
