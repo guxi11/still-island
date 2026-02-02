@@ -24,6 +24,14 @@ struct HomeView: View {
     @State private var dragOffset: CGSize = .zero
     @State private var dragDirection: DragDirection? = nil
     
+    // 卡片滑动状态
+    enum CardSwipeState {
+        case idle           // 初始状态
+        case swipingUp      // 正在上滑
+        case swipingDown    // 正在下滑（编辑面板）
+    }
+    @State private var cardSwipeState: CardSwipeState = .idle
+    
     // PiP host view state
     @State private var currentProvider: PiPContentProvider?
     @State private var pipViewId = UUID()
@@ -109,6 +117,11 @@ struct HomeView: View {
                                 }
                                 return cornerX
                             }
+                            // 上滑时跟手移动到角落
+                            if isCurrent && dragOffset.height < 0 {
+                                let progress = min(abs(dragOffset.height) / 150, 1.0)
+                                return centerX + (cornerX - centerX) * progress
+                            }
                             return centerX + baseOffset + dragOffset.width
                         }()
                         
@@ -120,6 +133,11 @@ struct HomeView: View {
                                     return cornerY + (centerY - cornerY) * progress
                                 }
                                 return cornerY
+                            }
+                            // 上滑时跟手移动到角落
+                            if isCurrent && dragOffset.height < 0 {
+                                let progress = min(abs(dragOffset.height) / 150, 1.0)
+                                return centerY + (cornerY - centerY) * progress
                             }
                             // 普通状态下滑显示编辑面板
                             if isCurrent && dragOffset.height > 0 {
@@ -135,6 +153,11 @@ struct HomeView: View {
                                     return miniScale + (1.0 - miniScale) * progress
                                 }
                                 return miniScale
+                            }
+                            // 上滑时跟手缩小
+                            if isCurrent && dragOffset.height < 0 {
+                                let progress = min(abs(dragOffset.height) / 150, 1.0)
+                                return 1.0 - (1.0 - miniScale) * progress
                             }
                             return isCurrent ? 1.0 : 0.85
                         }()
@@ -186,15 +209,49 @@ struct HomeView: View {
                     emptyStateView
                 }
                 
-                // Statistics overlay (visible when PiP is active)
-                if pipManager.isPiPActive {
-                    statisticsOverlay(safeArea: safeArea)
-                        .transition(.opacity.combined(with: .move(edge: .bottom)))
+                // 计算上滑进度（用于统计数据和提示的动画）
+                let swipeUpProgress: CGFloat = {
+                    if inCorner { return 1.0 }
+                    if dragOffset.height < 0 && cardSwipeState != .swipingDown {
+                        return min(abs(dragOffset.height) / 150, 1.0)
+                    }
+                    return 0
+                }()
+                
+                // 下滑进度（PiP 激活时）
+                let swipeDownProgress: CGFloat = {
+                    if inCorner && dragOffset.height > 0 {
+                        return min(dragOffset.height / 200, 1.0)
+                    }
+                    return 0
+                }()
+                
+                // Statistics overlay with handle - 随上滑动作入场，下滑出场
+                if pipManager.isPiPActive || swipeUpProgress > 0 {
+                    let effectiveProgress = swipeUpProgress * (1 - swipeDownProgress)
+                    
+                    VStack(spacing: 0) {
+                        Spacer()
+                        
+                        VStack(spacing: 12) {
+                            // 横杠指示器（在统计数据上方）
+                            SwipeIndicator(progress: swipeUpProgress)
+                            
+                            // 统计数据内容
+                            statisticsContent(safeArea: safeArea)
+                        }
+                        .padding(.horizontal, 24)
+                        .padding(.bottom, safeArea.bottom + 40)
+                    }
+                    .opacity(Double(effectiveProgress))
+                    .offset(y: CGFloat((1 - effectiveProgress) * 100))
                 }
                 
-                // Gesture hint (visible in normal state)
-                if !pipManager.isPiPActive && !cardManager.cards.isEmpty && !showEditPanel {
-                    gestureHintView
+                // Swipe up hint (only in idle state)
+                if !cardManager.cards.isEmpty && !showEditPanel && swipeUpProgress == 0 && !inCorner {
+                    SwipeIndicator(progress: 0)
+                        .padding(.bottom, 180)
+                        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
                 }
                 
                 // Edit panel overlay
@@ -261,39 +318,16 @@ struct HomeView: View {
         }
     }
     
-    private var gestureHintView: some View {
-        VStack {
-            Spacer()
-            
-            VStack(spacing: 4) {
-                Image(systemName: "chevron.up")
-                    .font(.system(size: 14, weight: .medium))
-                Text("上滑启动")
-                    .font(.caption2)
-            }
-            .foregroundStyle(.black.opacity(0.2))
-            .padding(.bottom, 180)
-        }
-        .allowsHitTesting(false)
-    }
+    // MARK: - Statistics Content
     
-    // MARK: - Statistics Overlay (shown when PiP is active)
-    
-    private func statisticsOverlay(safeArea: EdgeInsets) -> some View {
-        VStack(spacing: 0) {
-            Spacer()
+    private func statisticsContent(safeArea: EdgeInsets) -> some View {
+        VStack(spacing: 20) {
+            // Today's stats
+            todayStatsCard
             
-            VStack(spacing: 20) {
-                // Today's stats
-                todayStatsCard
-                
-                // Quick links
-                quickLinksSection
-            }
-            .padding(.horizontal, 24)
-            .padding(.bottom, safeArea.bottom + 40)
+            // Quick links
+            quickLinksSection
         }
-        .animation(.easeInOut(duration: 0.3), value: pipManager.isPiPActive)
     }
     
     private var todayStatsCard: some View {
@@ -525,6 +559,15 @@ struct HomeView: View {
         // Determine drag direction on first significant movement
         if dragDirection == nil && (horizontalDistance > 15 || verticalDistance > 15) {
             dragDirection = horizontalDistance > verticalDistance ? .horizontal : .vertical
+            
+            // 设置滑动状态
+            if dragDirection == .vertical && !pipManager.isPiPActive {
+                if translation.height < 0 {
+                    cardSwipeState = .swipingUp
+                } else if translation.height > 0 && cardSwipeState == .idle {
+                    cardSwipeState = .swipingDown
+                }
+            }
         }
         
         guard let direction = dragDirection else { return }
@@ -538,8 +581,16 @@ struct HomeView: View {
             
         case .vertical:
             if !pipManager.isPiPActive {
-                // Allow both up and down drag
-                dragOffset = CGSize(width: 0, height: translation.height)
+                // 根据滑动状态决定是否允许
+                if cardSwipeState == .swipingUp {
+                    // 上滑状态：只允许上滑
+                    dragOffset = CGSize(width: 0, height: min(translation.height, 0))
+                } else if cardSwipeState == .swipingDown {
+                    // 下滑状态：只允许下滑
+                    dragOffset = CGSize(width: 0, height: max(translation.height, 0))
+                } else {
+                    dragOffset = CGSize(width: 0, height: translation.height)
+                }
             } else {
                 // Only allow downward drag to close PiP
                 if translation.height > 0 {
@@ -561,6 +612,10 @@ struct HomeView: View {
                 dragOffset = .zero
             }
             dragDirection = nil
+            // 重置滑动状态
+            if !pipManager.isPiPActive && !pipManager.isPreparingPiP {
+                cardSwipeState = .idle
+            }
         }
         
         guard let direction = dragDirection else { return }
@@ -586,11 +641,11 @@ struct HomeView: View {
             let velocityThreshold: CGFloat = 800
             
             if !pipManager.isPiPActive {
-                if translation.height < -threshold || velocity.height < -velocityThreshold {
+                if cardSwipeState == .swipingUp && (translation.height < -threshold || velocity.height < -velocityThreshold) {
                     // Swipe up to start PiP
                     startPiP()
-                } else if translation.height > threshold || velocity.height > velocityThreshold {
-                    // Swipe down to show edit panel
+                } else if cardSwipeState == .swipingDown && (translation.height > threshold || velocity.height > velocityThreshold) {
+                    // Swipe down to show edit panel (only if started from idle)
                     withAnimation(.spring(response: 0.35, dampingFraction: 0.8)) {
                         showEditPanel = true
                     }
@@ -831,6 +886,38 @@ struct RoundedCorner: Shape {
             cornerRadii: CGSize(width: radius, height: radius)
         )
         return Path(path.cgPath)
+    }
+}
+
+// MARK: - Swipe Indicator Component
+
+/// 上滑/下滑指示器组件
+/// progress: 0 = 显示上滑箭头, 1 = 显示横杠
+struct SwipeIndicator: View {
+    let progress: CGFloat
+    
+    var body: some View {
+        ZStack {
+            // 上滑箭头（progress 小时显示）
+            VStack(spacing: 4) {
+                Image(systemName: "chevron.up")
+                    .font(.system(size: 14, weight: .medium))
+                Text("上滑启动")
+                    .font(.caption2)
+            }
+            .foregroundStyle(.black.opacity(0.25))
+            .opacity(Double(1 - progress))
+            .scaleEffect(1 - progress * 0.3)
+            
+            // 横杠（progress 大时显示）
+            RoundedRectangle(cornerRadius: 2.5)
+                .fill(Color.black.opacity(0.2))
+                .frame(width: 36, height: 4)
+                .opacity(Double(progress))
+                .scaleEffect(0.7 + progress * 0.3)
+        }
+        .frame(height: 30)
+        .allowsHitTesting(false)
     }
 }
 
