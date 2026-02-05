@@ -158,17 +158,25 @@ class VideoScene: SKScene {
         
         print("[VideoScene] Will extract \(totalFrames) frames at \(targetFPS) fps")
         
-        // Get video track to determine aspect ratio
+        // Get video track to determine aspect ratio and orientation
         var videoSize = CGSize(width: 320, height: 180) // Default
         do {
             let tracks = try await asset.loadTracks(withMediaType: .video)
             if let track = tracks.first {
                 let naturalSize = try await track.load(.naturalSize)
                 let transform = try await track.load(.preferredTransform)
-                // Apply transform to get correct orientation
-                let transformedSize = naturalSize.applying(transform)
-                videoSize = CGSize(width: abs(transformedSize.width), height: abs(transformedSize.height))
-                print("[VideoScene] Video natural size: \(videoSize)")
+                
+                // 根据transform判断视频是否旋转90/270度
+                // transform.a和transform.d为0时表示旋转了90或270度
+                let isRotated = transform.a == 0 && transform.d == 0
+                
+                if isRotated {
+                    // 视频旋转了90/270度，宽高需要交换
+                    videoSize = CGSize(width: naturalSize.height, height: naturalSize.width)
+                } else {
+                    videoSize = naturalSize
+                }
+                print("[VideoScene] Video natural size: \(naturalSize), transform: \(transform), corrected size: \(videoSize)")
             }
         } catch {
             print("[VideoScene] Failed to get video size: \(error)")
@@ -204,12 +212,28 @@ class VideoScene: SKScene {
         print("[VideoScene] Frame extraction size: \(targetWidth) x \(targetHeight)")
         
         var extractedTextures: [SKTexture] = []
+        var actualAspectRatio: CGFloat?
         
         for i in 0..<totalFrames {
             let time = CMTime(seconds: Double(i) * frameInterval, preferredTimescale: 600)
             
             do {
                 let (image, _) = try await generator.image(at: time)
+                
+                // 从第一帧实际提取的图片获取正确的宽高比
+                // 因为 appliesPreferredTrackTransform = true 会自动应用旋转
+                if actualAspectRatio == nil {
+                    let frameWidth = CGFloat(image.width)
+                    let frameHeight = CGFloat(image.height)
+                    actualAspectRatio = frameWidth / frameHeight
+                    print("[VideoScene] Actual frame size: \(frameWidth) x \(frameHeight), aspect ratio: \(actualAspectRatio!)")
+                    
+                    // 更新 aspect ratio
+                    await MainActor.run {
+                        self.videoAspectRatio = actualAspectRatio!
+                    }
+                }
+                
                 let uiImage = UIImage(cgImage: image)
                 let texture = SKTexture(image: uiImage)
                 // Use nearest filtering for better performance, linear for quality

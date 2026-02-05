@@ -46,6 +46,7 @@ struct HomeView: View {
     @State private var editingCardId: UUID?
     @State private var showStatistics = false
     @State private var showPrivacyPolicy = false
+    @State private var showFocusRoom = false
     
     // Warm cream/milk white background
     private let backgroundColor = Color(red: 250/255, green: 247/255, blue: 240/255)
@@ -311,6 +312,9 @@ struct HomeView: View {
             .presentationDetents([.fraction(0.8)])
             .presentationDragIndicator(.visible)
         }
+        .sheet(isPresented: $showFocusRoom) {
+            FocusRoomView()
+        }
     }
     
     // MARK: - Subviews
@@ -401,6 +405,23 @@ struct HomeView: View {
     
     private var quickLinksSection: some View {
         HStack(spacing: 12) {
+            // Focus Room button
+            Button {
+                showFocusRoom = true
+            } label: {
+                HStack(spacing: 6) {
+                    Image(systemName: "person.2.fill")
+                        .font(.system(size: 14))
+                    Text("专注房间")
+                        .font(.system(size: 13, weight: .medium))
+                }
+                .foregroundStyle(.black.opacity(0.55))
+                .padding(.horizontal, 14)
+                .padding(.vertical, 10)
+                .background(.ultraThinMaterial)
+                .cornerRadius(10)
+            }
+            
             // Statistics button
             Button {
                 showStatistics = true

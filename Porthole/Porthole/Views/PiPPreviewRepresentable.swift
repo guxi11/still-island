@@ -8,6 +8,7 @@
 import SwiftUI
 import UIKit
 import AVFoundation
+import ImageIO
 
 /// SwiftUI representable for displaying a live preview of PiP content
 struct PiPPreviewRepresentable: UIViewRepresentable {
@@ -92,9 +93,8 @@ struct PiPStaticPreview: View {
                         .foregroundStyle(.white.opacity(0.8))
                 }
             case .cat:
-                // Show cat emoji on white background
-                Text("🐱")
-                    .font(.system(size: 50))
+                // Show GIF first frame on black background
+                GifFirstFrameView(assetName: "cat1")
             case .video:
                 // Video shows thumbnail if available, otherwise play icon
                 if let url = videoURL {
@@ -103,6 +103,18 @@ struct PiPStaticPreview: View {
                     Image(systemName: "play.rectangle.fill")
                         .font(.system(size: 28, weight: .medium))
                         .foregroundStyle(.white.opacity(0.8))
+                }
+            case .focusRoom:
+                // Focus room shows icon and status
+                VStack(spacing: 6) {
+                    Image(systemName: "person.2.fill")
+                        .font(.system(size: 28, weight: .medium))
+                        .foregroundStyle(.white.opacity(0.8))
+                    if let room = FocusRoomService.shared.currentRoom {
+                        Text("\(room.focusingCount)/\(room.peers.count)")
+                            .font(.system(size: 12, weight: .medium, design: .rounded))
+                            .foregroundStyle(.white.opacity(0.6))
+                    }
                 }
             default:
                 Text(previewText)
@@ -121,9 +133,11 @@ struct PiPStaticPreview: View {
         case .camera:
             return Color(red: 0.15, green: 0.12, blue: 0.18)
         case .cat:
-            return .white
+            return .black
         case .video:
             return Color(red: 0.12, green: 0.1, blue: 0.18)
+        case .focusRoom:
+            return Color(red: 0.1, green: 0.12, blue: 0.18)
         }
     }
 
@@ -138,6 +152,8 @@ struct PiPStaticPreview: View {
         case .cat:
             return Color(red: 0.95, green: 0.6, blue: 0.3)
         case .video:
+            return .white
+        case .focusRoom:
             return .white
         }
     }
@@ -155,6 +171,8 @@ struct PiPStaticPreview: View {
         case .cat:
             return ""
         case .video:
+            return ""
+        case .focusRoom:
             return ""
         }
     }
@@ -282,5 +300,46 @@ struct Triangle: Shape {
         path.addLine(to: CGPoint(x: rect.minX, y: rect.maxY))
         path.closeSubpath()
         return path
+    }
+}
+
+/// View for displaying GIF first frame
+struct GifFirstFrameView: View {
+    let assetName: String
+    @State private var image: UIImage?
+    
+    var body: some View {
+        GeometryReader { geometry in
+            if let image = image {
+                Image(uiImage: image)
+                    .resizable()
+                    .aspectRatio(contentMode: .fit)
+                    .frame(width: geometry.size.width, height: geometry.size.height)
+            }
+        }
+        .onAppear {
+            loadFirstFrame()
+        }
+    }
+    
+    private func loadFirstFrame() {
+        // 尝试从 NSDataAsset 加载
+        if let asset = NSDataAsset(name: assetName) {
+            if let source = CGImageSourceCreateWithData(asset.data as CFData, nil),
+               CGImageSourceGetCount(source) > 0,
+               let cgImage = CGImageSourceCreateImageAtIndex(source, 0, nil) {
+                image = UIImage(cgImage: cgImage)
+                return
+            }
+        }
+        
+        // 尝试从 Bundle 直接加载 gif 文件
+        if let url = Bundle.main.url(forResource: assetName, withExtension: "gif"),
+           let data = try? Data(contentsOf: url),
+           let source = CGImageSourceCreateWithData(data as CFData, nil),
+           CGImageSourceGetCount(source) > 0,
+           let cgImage = CGImageSourceCreateImageAtIndex(source, 0, nil) {
+            image = UIImage(cgImage: cgImage)
+        }
     }
 }

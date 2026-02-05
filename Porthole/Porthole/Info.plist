@@ -8,5 +8,11 @@
 	</array>
 	<key>ITSAppUsesNonExemptEncryption</key>
 	<false/>
+	<key>NSLocalNetworkUsageDescription</key>
+	<string>用于与附近的朋友同步专注状态</string>
+	<key>NSBonjourServices</key>
+	<array>
+		<string>_porthole-focus._tcp</string>
+	</array>
 </dict>
 </plist>

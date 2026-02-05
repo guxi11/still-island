@@ -9,7 +9,7 @@
 import SpriteKit
 
 class CatScene: SKScene {
-    
+
     // MARK: - Configuration
 
     // Sprite sheet layout: 2x2 grid (田字格)
@@ -20,7 +20,7 @@ class CatScene: SKScene {
     private let timePerFrame = 0.15
 
     // MARK: - Nodes
-    
+
     private var catNode: SKSpriteNode?
     
     // MARK: - State

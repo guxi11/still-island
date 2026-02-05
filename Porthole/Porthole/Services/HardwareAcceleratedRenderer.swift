@@ -36,11 +36,41 @@ final class VideoHardwareRenderer: HardwareAcceleratedRenderer {
     private var displayLink: CADisplayLink?
     private var loopObserver: NSObjectProtocol?
     private var frameCount = 0
+    private var videoRotationAngle: CGFloat = 0  // 视频旋转角度（弧度）
     
     init(videoURL: URL, displayLayer: AVSampleBufferDisplayLayer) {
         self.videoURL = videoURL
         self.displayLayer = displayLayer
         setupDisplayLayer()
+        loadVideoTransform()
+    }
+    
+    /// 加载视频的旋转变换信息
+    private func loadVideoTransform() {
+        let asset = AVAsset(url: videoURL)
+        Task {
+            do {
+                let tracks = try await asset.loadTracks(withMediaType: .video)
+                if let track = tracks.first {
+                    let transform = try await track.load(.preferredTransform)
+                    
+                    // 从 transform 矩阵计算旋转角度
+                    // transform.a = cos(θ), transform.b = sin(θ)
+                    let angle = atan2(transform.b, transform.a)
+                    
+                    await MainActor.run {
+                        self.videoRotationAngle = angle
+                        // 应用旋转到 display layer
+                        if angle != 0 {
+                            self.displayLayer.setAffineTransform(CGAffineTransform(rotationAngle: angle))
+                            print("[VideoHardwareRenderer] Applied rotation: \(angle * 180 / .pi) degrees")
+                        }
+                    }
+                }
+            } catch {
+                print("[VideoHardwareRenderer] Failed to load video transform: \(error)")
+            }
+        }
     }
     
     private func setupDisplayLayer() {

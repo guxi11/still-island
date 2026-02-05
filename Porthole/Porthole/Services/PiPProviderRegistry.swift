@@ -15,6 +15,7 @@ enum PiPProviderType: String, CaseIterable, Identifiable {
     case camera = "camera"
     case cat = "cat"
     case video = "video"
+    case focusRoom = "focusRoom"
 
     var id: String { rawValue }
 
@@ -25,6 +26,7 @@ enum PiPProviderType: String, CaseIterable, Identifiable {
         case .camera: return CameraProvider.displayName
         case .cat: return CatCompanionProvider.displayName
         case .video: return VideoLoopProvider.displayName
+        case .focusRoom: return FocusRoomProvider.displayName
         }
     }
 
@@ -35,15 +37,14 @@ enum PiPProviderType: String, CaseIterable, Identifiable {
         case .camera: return CameraProvider.iconName
         case .cat: return CatCompanionProvider.iconName
         case .video: return VideoLoopProvider.iconName
+        case .focusRoom: return FocusRoomProvider.iconName
         }
     }
 
     /// Whether the provider has a light background (for text color adjustment)
     var hasLightBackground: Bool {
-        switch self {
-        case .cat: return true
-        default: return false
-        }
+        // 所有卡片都是深色背景
+        return false
     }
 
     /// Whether this provider type supports custom content (like video selection)
@@ -58,7 +59,15 @@ enum PiPProviderType: String, CaseIterable, Identifiable {
     var allowsMultipleInstances: Bool {
         switch self {
         case .video: return true
-        case .time, .timer, .camera, .cat: return false
+        case .time, .timer, .camera, .cat, .focusRoom: return false
+        }
+    }
+    
+    /// Whether this provider requires joining a focus room first
+    var requiresFocusRoom: Bool {
+        switch self {
+        case .focusRoom: return true
+        default: return false
         }
     }
 
@@ -75,6 +84,8 @@ enum PiPProviderType: String, CaseIterable, Identifiable {
             return CatCompanionProvider()
         case .video:
             return VideoLoopProvider()
+        case .focusRoom:
+            return FocusRoomProvider()
         }
     }
 
@@ -97,6 +108,8 @@ enum PiPProviderType: String, CaseIterable, Identifiable {
                 provider.setVideoURL(url)
             }
             return provider
+        case .focusRoom:
+            return FocusRoomProvider()
         }
     }
 }
