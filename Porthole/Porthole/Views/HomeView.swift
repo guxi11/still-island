@@ -214,7 +214,8 @@ struct HomeView: View {
                 // 计算上滑进度（用于统计数据和提示的动画）
                 let swipeUpProgress: CGFloat = {
                     // 已经在角落或正在准备：显示完整统计数据
-                    if inCorner || pipManager.isPreparingPiP {
+                    // if inCorner || pipManager.isPreparingPiP {
+                    if inCorner {
                         return 1.0
                     }
                     // 上滑手势中：跟随手势进度
@@ -684,6 +685,7 @@ struct HomeView: View {
                 if cardSwipeState == .swipingUp {
                     if translation.height < -threshold || velocity.height < -velocityThreshold {
                         // 上滑成功 - 立即重置状态，让卡片通过 inCorner 状态跳转到角落
+                        UIImpactFeedbackGenerator(style: .medium).impactOccurred()
                         dragOffset = .zero
                         dragDirection = nil
 
@@ -919,18 +921,6 @@ struct CardItemView: View {
                     ProgressView()
                         .scaleEffect(1.2)
                         .tint(.white)
-                }
-                
-                // Active indicator
-                if isPiPActive {
-                    VStack {
-                        HStack {
-                            Spacer()
-                            PulsingDot()
-                                .padding(10)
-                        }
-                        Spacer()
-                    }
                 }
             }
             .frame(width: cardWidth, height: cardHeight)
