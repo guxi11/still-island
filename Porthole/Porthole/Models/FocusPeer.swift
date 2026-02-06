@@ -24,6 +24,9 @@ struct FocusPeer: Identifiable, Codable, Equatable {
     /// 今日累计专注时长（秒）
     var totalFocusToday: TimeInterval
     
+    /// 是否正在说话
+    var isTalking: Bool
+    
     /// 当前专注时长（动态计算）
     var currentFocusDuration: TimeInterval {
         guard isFocusing, let start = focusStartTime else { return 0 }
@@ -41,6 +44,7 @@ struct FocusPeer: Identifiable, Codable, Equatable {
         self.isFocusing = false
         self.focusStartTime = nil
         self.totalFocusToday = 0
+        self.isTalking = false
     }
 }
 
@@ -50,6 +54,7 @@ struct FocusStatusMessage: Codable {
         case statusUpdate   // 状态更新
         case syncRequest    // 请求同步
         case syncResponse   // 同步响应
+        case talkingState   // 说话状态
     }
     
     let type: MessageType

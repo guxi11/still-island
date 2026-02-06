@@ -237,6 +237,8 @@ struct HomeView: View {
                 // Statistics overlay with handle - 随上滑动作入场，下滑出场
                 if pipManager.isPiPActive || pipManager.isPreparingPiP || swipeUpProgress > 0 {
                     let effectiveProgress = swipeUpProgress * (1 - swipeDownProgress)
+                    // 判断当前是否为专注房间卡片且 PiP 激活
+                    let isFocusRoomPiPActive = pipManager.isPiPActive && currentCard?.providerType == .focusRoom
                     
                     VStack(spacing: 0) {
                         Spacer()
@@ -244,6 +246,28 @@ struct HomeView: View {
                         VStack(spacing: 12) {
                             // 横杠指示器（在统计数据上方）
                             SwipeIndicator(progress: swipeUpProgress)
+                            
+                            // 专注房间入口（仅在专注房间 PiP 激活时显示在数据区域上方）
+                            if isFocusRoomPiPActive {
+                                Button {
+                                    showFocusRoom = true
+                                } label: {
+                                    HStack(spacing: 8) {
+                                        Image(systemName: "person.2.fill")
+                                            .font(.system(size: 15))
+                                        Text(FocusRoomService.shared.currentRoom?.name ?? "专注房间")
+                                            .font(.system(size: 14, weight: .medium))
+                                        Spacer()
+                                        Image(systemName: "chevron.right")
+                                            .font(.system(size: 12, weight: .medium))
+                                    }
+                                    .foregroundStyle(.black.opacity(0.6))
+                                    .padding(.horizontal, 16)
+                                    .padding(.vertical, 12)
+                                    .background(.ultraThinMaterial)
+                                    .cornerRadius(12)
+                                }
+                            }
                             
                             // 统计数据内容
                             statisticsContent(safeArea: safeArea)
@@ -278,6 +302,13 @@ struct HomeView: View {
         .onChange(of: pipManager.isPiPActive) { isActive in
             if !isActive {
                 currentProvider = nil
+            } else {
+                // PiP 启动成功后，如果是专注房间卡片且未加入房间，自动弹出房间弹窗
+                if currentCard?.providerType == .focusRoom && !FocusRoomService.shared.isInRoom {
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+                        showFocusRoom = true
+                    }
+                }
             }
         }
         .sheet(isPresented: $showAddCard) {
@@ -314,6 +345,8 @@ struct HomeView: View {
         }
         .sheet(isPresented: $showFocusRoom) {
             FocusRoomView()
+                .presentationDetents([.fraction(0.7)])
+                .presentationDragIndicator(.visible)
         }
     }
     
@@ -405,23 +438,6 @@ struct HomeView: View {
     
     private var quickLinksSection: some View {
         HStack(spacing: 12) {
-            // Focus Room button
-            Button {
-                showFocusRoom = true
-            } label: {
-                HStack(spacing: 6) {
-                    Image(systemName: "person.2.fill")
-                        .font(.system(size: 14))
-                    Text("专注房间")
-                        .font(.system(size: 13, weight: .medium))
-                }
-                .foregroundStyle(.black.opacity(0.55))
-                .padding(.horizontal, 14)
-                .padding(.vertical, 10)
-                .background(.ultraThinMaterial)
-                .cornerRadius(10)
-            }
-            
             // Statistics button
             Button {
                 showStatistics = true
@@ -791,6 +807,9 @@ struct HomeView: View {
             }
         }
         
+        // For focus room provider, allow starting PiP even without room
+        // Provider will show "暂未加入房间" state
+        
         print("[HomeView] Starting PiP for card: \(card.id)")
         
         pipViewId = UUID()
@@ -821,6 +840,9 @@ struct HomeView: View {
                 return
             }
         }
+        
+        // For focus room provider, allow preparing PiP even without room
+        // Provider will show "暂未加入房间" state
         
         print("[HomeView] Early preparing PiP for card: \(card.id)")
         

@@ -123,21 +123,32 @@ final class FocusRoomProvider: PiPContentProvider {
     // MARK: - Private Methods
     
     private func setupRoomObserver() {
-        FocusRoomService.shared.$currentRoom
+        // 订阅 FocusRoomService 的所有变化
+        FocusRoomService.shared.objectWillChange
             .receive(on: DispatchQueue.main)
             .sink { [weak self] _ in
-                self?.updateUI()
+                // 延迟一帧确保值已更新
+                DispatchQueue.main.async {
+                    self?.updateUI()
+                }
             }
             .store(in: &cancellables)
     }
     
     private func updateUI() {
-        guard let room = FocusRoomService.shared.currentRoom else {
-            roomNameLabel.text = "未加入房间"
-            statusLabel.text = "--"
+        let room = FocusRoomService.shared.currentRoom
+        print("[FocusRoomProvider] updateUI called, room: \(room?.name ?? "nil"), peers: \(room?.peers.count ?? 0)")
+        
+        guard let room = room else {
+            roomNameLabel.text = "专注房间"
+            statusLabel.text = "暂未加入房间"
+            statusLabel.font = UIFont.systemFont(ofSize: 16, weight: .medium)
             clearPeerViews()
             return
         }
+        
+        // 恢复状态标签字体
+        statusLabel.font = UIFont.monospacedDigitSystemFont(ofSize: 24, weight: .bold)
         
         // 房间名称
         roomNameLabel.text = room.name

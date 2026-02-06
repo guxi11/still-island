@@ -14,5 +14,7 @@
 	<array>
 		<string>_porthole-focus._tcp</string>
 	</array>
+	<key>NSMicrophoneUsageDescription</key>
+	<string>用于专注房间内的语音对讲功能</string>
 </dict>
 </plist>

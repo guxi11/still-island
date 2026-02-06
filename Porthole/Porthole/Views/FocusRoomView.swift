@@ -3,17 +3,20 @@
 //  Porthole
 //
 //  专注房间管理界面
-//  支持创建房间、发现并加入附近房间
+//  支持创建房间、发现并加入附近房间、语音对讲
 //
 
 import SwiftUI
 
 struct FocusRoomView: View {
-    @StateObject private var roomService = FocusRoomService.shared
+    @ObservedObject private var roomService = FocusRoomService.shared
+    @ObservedObject private var pipManager = PiPManager.shared
     @Environment(\.dismiss) private var dismiss
     
-    @State private var roomName: String = ""
     @State private var showCreateRoom = false
+    
+    /// 加入房间后的回调
+    var onJoinedRoom: (() -> Void)?
     
     var body: some View {
         NavigationStack {
@@ -56,8 +59,14 @@ struct FocusRoomView: View {
             .onDisappear {
                 roomService.stopBrowsing()
             }
+            .onChange(of: roomService.connectionState) { _, newState in
+                // 连接成功后触发回调
+                if newState == .connected || newState == .advertising {
+                    onJoinedRoom?()
+                }
+            }
             .sheet(isPresented: $showCreateRoom) {
-                createRoomSheet
+                createRoomSheet()
             }
         }
     }
@@ -164,21 +173,27 @@ struct FocusRoomView: View {
                 
                 Spacer()
                 
-                Image(systemName: "chevron.right")
-                    .font(.system(size: 14, weight: .medium))
-                    .foregroundStyle(.black.opacity(0.3))
+                if roomService.connectionState == .connecting {
+                    ProgressView()
+                        .scaleEffect(0.8)
+                } else {
+                    Image(systemName: "chevron.right")
+                        .font(.system(size: 14, weight: .medium))
+                        .foregroundStyle(.black.opacity(0.3))
+                }
             }
             .padding(14)
             .background(.ultraThinMaterial)
             .cornerRadius(12)
         }
         .buttonStyle(.plain)
+        .disabled(roomService.connectionState == .connecting)
     }
     
     // MARK: - Room Content View (已在房间中)
     
     private func roomContentView(_ room: FocusRoom) -> some View {
-        VStack(spacing: 20) {
+        VStack(spacing: 0) {
             // 房间状态
             VStack(spacing: 8) {
                 Text(room.isHost ? "你创建了这个房间" : "你已加入房间")
@@ -194,11 +209,12 @@ struct FocusRoomView: View {
                 .foregroundStyle(.black.opacity(0.6))
             }
             .padding(.top, 10)
+            .padding(.bottom, 16)
             
-            // 参与者列表
+            // 参与者列表（不显示自己）
             ScrollView {
                 LazyVStack(spacing: 12) {
-                    ForEach(room.peers) { peer in
+                    ForEach(room.peers.filter { $0.id != roomService.myPeerId }) { peer in
                         peerRow(peer)
                     }
                 }
@@ -207,17 +223,60 @@ struct FocusRoomView: View {
             
             Spacer()
             
-            // 提示
-            Text("上滑启动 PiP 开始专注")
-                .font(.system(size: 13))
-                .foregroundStyle(.black.opacity(0.35))
-                .padding(.bottom, 20)
+            // 语音对讲按钮（只在有其他人连接时显示）
+            if roomService.canTalk {
+                voiceChatButton
+                    .padding(.bottom, 16)
+            }
+            
+            // 提示（只在 PiP 未激活时显示）
+            if !pipManager.isPiPActive {
+                Text("上滑启动 PiP 开始专注")
+                    .font(.system(size: 13))
+                    .foregroundStyle(.black.opacity(0.35))
+                    .padding(.bottom, 20)
+            } else {
+                // PiP 已激活时的底部间距
+                Spacer()
+                    .frame(height: 20)
+            }
         }
+    }
+    
+    private var voiceChatButton: some View {
+        Button {
+            // 长按开始说话，松开停止
+        } label: {
+            HStack(spacing: 10) {
+                Image(systemName: roomService.isTalking ? "waveform" : "mic.fill")
+                    .font(.system(size: 20))
+                Text(roomService.isTalking ? "正在说话..." : "按住说话")
+                    .font(.system(size: 16, weight: .medium))
+            }
+            .foregroundStyle(roomService.isTalking ? .white : .black.opacity(0.7))
+            .frame(maxWidth: .infinity)
+            .padding(.vertical, 16)
+            .background(roomService.isTalking ? Color.green : Color.black.opacity(0.08))
+            .cornerRadius(14)
+        }
+        .buttonStyle(.plain)
+        .padding(.horizontal, 20)
+        .simultaneousGesture(
+            DragGesture(minimumDistance: 0)
+                .onChanged { _ in
+                    if !roomService.isTalking {
+                        roomService.startTalking()
+                    }
+                }
+                .onEnded { _ in
+                    roomService.stopTalking()
+                }
+        )
     }
     
     private func peerRow(_ peer: FocusPeer) -> some View {
         HStack(spacing: 14) {
-            // 头像
+            // 头像（说话时有动画边框）
             Circle()
                 .fill(peer.isFocusing ? Color.green.opacity(0.2) : Color.black.opacity(0.08))
                 .frame(width: 48, height: 48)
@@ -226,6 +285,14 @@ struct FocusRoomView: View {
                         .font(.system(size: 18, weight: .semibold))
                         .foregroundStyle(peer.isFocusing ? .green : .black.opacity(0.4))
                 }
+                .overlay {
+                    // 说话指示器
+                    if peer.isTalking || roomService.activeSpeakers.contains(peer.id) {
+                        Circle()
+                            .stroke(Color.green, lineWidth: 3)
+                            .scaleEffect(1.1)
+                    }
+                }
             
             VStack(alignment: .leading, spacing: 4) {
                 HStack(spacing: 6) {
@@ -233,7 +300,23 @@ struct FocusRoomView: View {
                         .font(.system(size: 16, weight: .medium))
                         .foregroundStyle(.black.opacity(0.8))
                     
-                    if peer.id == FocusRoomService.shared.currentRoom?.hostPeerId {
+                    // 判断是否是房主
+                    // 如果自己是房主，则自己的 peer 显示房主标签
+                    // 如果自己不是房主，则 hostPeerId 对应的 peer（且不是自己）显示房主标签
+                    let isSelf = peer.id == roomService.myPeerId
+                    let isThisPeerHost: Bool = {
+                        if let room = roomService.currentRoom {
+                            if room.isHost {
+                                // 我是房主，只有自己显示房主标签
+                                return isSelf
+                            } else {
+                                // 我不是房主，hostPeerId 对应的人（不是自己）显示房主标签
+                                return peer.id == room.hostPeerId && !isSelf
+                            }
+                        }
+                        return false
+                    }()
+                    if isThisPeerHost {
                         Text("房主")
                             .font(.system(size: 10, weight: .medium))
                             .foregroundStyle(.white)
@@ -241,6 +324,13 @@ struct FocusRoomView: View {
                             .padding(.vertical, 2)
                             .background(Color.black.opacity(0.5))
                             .cornerRadius(4)
+                    }
+                    
+                    // 说话图标
+                    if peer.isTalking || roomService.activeSpeakers.contains(peer.id) {
+                        Image(systemName: "waveform")
+                            .font(.system(size: 12))
+                            .foregroundStyle(.green)
                     }
                 }
                 
@@ -275,7 +365,38 @@ struct FocusRoomView: View {
     
     // MARK: - Create Room Sheet
     
-    private var createRoomSheet: some View {
+    private func createRoomSheet() -> some View {
+        CreateRoomSheet(roomService: roomService) {
+            showCreateRoom = false
+        }
+    }
+    
+    // MARK: - Helpers
+    
+    private func formatDuration(_ duration: TimeInterval) -> String {
+        let totalSeconds = Int(duration)
+        let hours = totalSeconds / 3600
+        let minutes = (totalSeconds % 3600) / 60
+        let seconds = totalSeconds % 60
+        
+        if hours > 0 {
+            return String(format: "%d:%02d:%02d", hours, minutes, seconds)
+        } else {
+            return String(format: "%d:%02d", minutes, seconds)
+        }
+    }
+}
+
+// MARK: - Create Room Sheet (独立结构体以支持 @FocusState)
+
+private struct CreateRoomSheet: View {
+    @ObservedObject var roomService: FocusRoomService
+    var onDismiss: () -> Void
+    
+    @State private var roomName: String = ""
+    @FocusState private var isNameFocused: Bool
+    
+    var body: some View {
         NavigationStack {
             VStack(spacing: 24) {
                 VStack(alignment: .leading, spacing: 8) {
@@ -288,13 +409,14 @@ struct FocusRoomView: View {
                         .padding(14)
                         .background(Color.black.opacity(0.05))
                         .cornerRadius(10)
+                        .focused($isNameFocused)
                 }
                 .padding(.horizontal, 20)
                 
                 Button {
                     let name = roomName.isEmpty ? "\(UIDevice.current.name) 的房间" : roomName
                     roomService.createRoom(name: name)
-                    showCreateRoom = false
+                    onDismiss()
                 } label: {
                     Text("创建")
                         .font(.system(size: 17, weight: .semibold))
@@ -311,30 +433,20 @@ struct FocusRoomView: View {
             .padding(.top, 20)
             .navigationTitle("创建房间")
             .navigationBarTitleDisplayMode(.inline)
+            .onAppear {
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+                    isNameFocused = true
+                }
+            }
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {
                     Button("取消") {
-                        showCreateRoom = false
+                        onDismiss()
                     }
                 }
             }
         }
         .presentationDetents([.height(250)])
-    }
-    
-    // MARK: - Helpers
-    
-    private func formatDuration(_ duration: TimeInterval) -> String {
-        let totalSeconds = Int(duration)
-        let hours = totalSeconds / 3600
-        let minutes = (totalSeconds % 3600) / 60
-        let seconds = totalSeconds % 60
-        
-        if hours > 0 {
-            return String(format: "%d:%02d:%02d", hours, minutes, seconds)
-        } else {
-            return String(format: "%d:%02d", minutes, seconds)
-        }
     }
 }
 
