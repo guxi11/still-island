@@ -277,6 +277,7 @@ struct HomeView: View {
                     }
                     .opacity(Double(effectiveProgress))
                     .offset(y: CGFloat((1 - effectiveProgress) * 100))
+                    .animation(nil, value: effectiveProgress)
                 }
                 
                 // Swipe up hint (only in idle state)
