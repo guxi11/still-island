@@ -15,7 +15,7 @@ import Combine
 /// Uses AVCaptureVideoPreviewLayer directly embedded in contentView for
 /// better compatibility with PiP and potential background operation.
 @MainActor
-final class CameraProvider: NSObject, PiPContentProvider {
+final class CameraProvider: NSObject, DirectVideoProvider {
     
     // MARK: - PiPContentProvider Static Properties
     
@@ -28,9 +28,13 @@ final class CameraProvider: NSObject, PiPContentProvider {
     let contentView: UIView
     let preferredFrameRate: Int = 30
 
+    // MARK: - DirectVideoProvider
+    
+    /// The output layer set by PiPManager for direct video output
+    private var outputLayer: AVSampleBufferDisplayLayer?
+    
     // MARK: - Private Properties
 
-    private let displayLayer: AVSampleBufferDisplayLayer
     private var renderer: CameraHardwareRenderer?
     private let placeholderLabel: UILabel
     private var isRunning = false
@@ -49,15 +53,9 @@ final class CameraProvider: NSObject, PiPContentProvider {
     override init() {
         // Create container view
         let containerSize = CGSize(width: 200, height: 100)
-        let container = VideoLayerView(frame: CGRect(origin: .zero, size: containerSize))
+        let container = UIView(frame: CGRect(origin: .zero, size: containerSize))
         container.backgroundColor = UIColor.black
         container.clipsToBounds = true
-
-        // Create display layer
-        displayLayer = AVSampleBufferDisplayLayer()
-        displayLayer.frame = container.bounds
-        displayLayer.videoGravity = .resizeAspectFill
-        container.layer.insertSublayer(displayLayer, at: 0)
 
         // Create placeholder label
         let label = UILabel()
@@ -82,7 +80,14 @@ final class CameraProvider: NSObject, PiPContentProvider {
 
         super.init()
 
-        print("[CameraProvider] Initialized with hardware-accelerated renderer")
+        print("[CameraProvider] Initialized with DirectVideoProvider support")
+    }
+    
+    // MARK: - DirectVideoProvider Methods
+    
+    func setOutputLayer(_ layer: AVSampleBufferDisplayLayer) {
+        print("[CameraProvider] setOutputLayer called")
+        self.outputLayer = layer
     }
     
     deinit {
@@ -154,8 +159,13 @@ final class CameraProvider: NSObject, PiPContentProvider {
         // Hide placeholder
         placeholderLabel.isHidden = true
 
-        // Create hardware renderer
-        renderer = CameraHardwareRenderer(displayLayer: displayLayer)
+        // Create hardware renderer with the output layer from PiPManager
+        guard let layer = outputLayer else {
+            print("[CameraProvider] ERROR: No output layer set")
+            showError("显示层未初始化")
+            return
+        }
+        renderer = CameraHardwareRenderer(displayLayer: layer)
 
         // Setup app lifecycle handling
         setupAppLifecycleHandling()
@@ -225,8 +235,7 @@ final class CameraProvider: NSObject, PiPContentProvider {
         
         print("[CameraProvider] Showing celebration for \(Int(duration)) seconds away")
         
-        // Hide display layer during celebration
-        displayLayer.isHidden = true
+        // Hide placeholder during celebration
         placeholderLabel.isHidden = true
         
         // Create and show celebration view
@@ -254,8 +263,7 @@ final class CameraProvider: NSObject, PiPContentProvider {
         celebrationView = nil
         isCelebrating = false
         
-        // Show display layer again
-        displayLayer.isHidden = false
+        // Note: Display layer is managed by PiPManager
         
         // Restore frame rate (CameraProvider already uses 30fps)
         DisplayTimeTracker.shared.clearLastAwayInterval()

@@ -12,7 +12,7 @@ import AVFoundation
 /// A content provider that plays video in a loop for PiP window using SpriteKit.
 /// This approach is identical to CatCompanionProvider for reliable PiP support.
 @MainActor
-final class VideoLoopProvider: NSObject, PiPContentProvider {
+final class VideoLoopProvider: NSObject, DirectVideoProvider {
 
     // MARK: - PiPContentProvider Static Properties
 
@@ -22,12 +22,16 @@ final class VideoLoopProvider: NSObject, PiPContentProvider {
 
     // MARK: - PiPContentProvider Properties
 
-    let contentView: UIView  // Container view with display layer
+    let contentView: UIView  // Container view for placeholder
     let preferredFrameRate: Int = 30
+    
+    // MARK: - DirectVideoProvider
+    
+    /// The output layer set by PiPManager for direct video output
+    private var outputLayer: AVSampleBufferDisplayLayer?
 
     // MARK: - Private Properties
 
-    private let displayLayer: AVSampleBufferDisplayLayer
     private var renderer: VideoHardwareRenderer?
     private let placeholderLabel: UILabel
     private var isRunning = false
@@ -45,14 +49,8 @@ final class VideoLoopProvider: NSObject, PiPContentProvider {
     override init() {
         // Create container view with fixed size
         let containerSize = CGSize(width: 200, height: 100)
-        let container = VideoLayerView(frame: CGRect(origin: .zero, size: containerSize))
+        let container = UIView(frame: CGRect(origin: .zero, size: containerSize))
         container.backgroundColor = .black
-
-        // Create display layer
-        displayLayer = AVSampleBufferDisplayLayer()
-        displayLayer.frame = container.bounds
-        displayLayer.videoGravity = .resizeAspectFill
-        container.layer.addSublayer(displayLayer)
 
         // Create placeholder label
         let label = UILabel()
@@ -77,14 +75,19 @@ final class VideoLoopProvider: NSObject, PiPContentProvider {
 
         super.init()
 
-        print("[VideoLoopProvider] Initialized with hardware-accelerated renderer")
+        print("[VideoLoopProvider] Initialized with DirectVideoProvider support")
     }
-
+    
     deinit {
         renderer?.stop()
     }
-
-    // MARK: - Private Methods
+    
+    // MARK: - DirectVideoProvider Methods
+    
+    func setOutputLayer(_ layer: AVSampleBufferDisplayLayer) {
+        print("[VideoLoopProvider] setOutputLayer called")
+        self.outputLayer = layer
+    }
 
     // MARK: - PiPContentProvider Methods
 
@@ -97,13 +100,16 @@ final class VideoLoopProvider: NSObject, PiPContentProvider {
         // Configure audio session
         configureAudioSession()
 
-        // Start renderer if URL is set
-        if let url = videoURL {
+        // Start renderer if URL is set and output layer is available
+        if let url = videoURL, let layer = outputLayer {
             placeholderLabel.isHidden = true
-            renderer = VideoHardwareRenderer(videoURL: url, displayLayer: displayLayer)
+            renderer = VideoHardwareRenderer(videoURL: url, displayLayer: layer)
             renderer?.start()
-        } else {
+        } else if videoURL == nil {
             placeholderLabel.text = "未选择视频"
+            placeholderLabel.isHidden = false
+        } else {
+            placeholderLabel.text = "显示层未初始化"
             placeholderLabel.isHidden = false
         }
     }
@@ -122,10 +128,10 @@ final class VideoLoopProvider: NSObject, PiPContentProvider {
         print("[VideoLoopProvider] Setting video URL: \(url)")
         self.videoURL = url
 
-        if isRunning {
+        if isRunning, let layer = outputLayer {
             // Recreate renderer with new URL
             renderer?.stop()
-            renderer = VideoHardwareRenderer(videoURL: url, displayLayer: displayLayer)
+            renderer = VideoHardwareRenderer(videoURL: url, displayLayer: layer)
             renderer?.start()
             placeholderLabel.isHidden = true
         }

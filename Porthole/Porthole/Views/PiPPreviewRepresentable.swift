@@ -104,18 +104,6 @@ struct PiPStaticPreview: View {
                         .font(.system(size: 28, weight: .medium))
                         .foregroundStyle(.white.opacity(0.8))
                 }
-            case .focusRoom:
-                // Focus room shows icon and status
-                VStack(spacing: 6) {
-                    Image(systemName: "person.2.fill")
-                        .font(.system(size: 28, weight: .medium))
-                        .foregroundStyle(.white.opacity(0.8))
-                    if let room = FocusRoomService.shared.currentRoom {
-                        Text("\(room.focusingCount)/\(room.peers.count)")
-                            .font(.system(size: 12, weight: .medium, design: .rounded))
-                            .foregroundStyle(.white.opacity(0.6))
-                    }
-                }
             default:
                 Text(previewText)
                     .font(.system(size: 32, weight: .semibold, design: .monospaced))
@@ -136,8 +124,6 @@ struct PiPStaticPreview: View {
             return .black
         case .video:
             return Color(red: 0.12, green: 0.1, blue: 0.18)
-        case .focusRoom:
-            return Color(red: 0.1, green: 0.12, blue: 0.18)
         }
     }
 
@@ -152,8 +138,6 @@ struct PiPStaticPreview: View {
         case .cat:
             return Color(red: 0.95, green: 0.6, blue: 0.3)
         case .video:
-            return .white
-        case .focusRoom:
             return .white
         }
     }
@@ -171,8 +155,6 @@ struct PiPStaticPreview: View {
         case .cat:
             return ""
         case .video:
-            return ""
-        case .focusRoom:
             return ""
         }
     }

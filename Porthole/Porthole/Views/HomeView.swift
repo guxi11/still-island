@@ -46,7 +46,6 @@ struct HomeView: View {
     @State private var editingCardId: UUID?
     @State private var showStatistics = false
     @State private var showPrivacyPolicy = false
-    @State private var showFocusRoom = false
     
     // Warm cream/milk white background
     private let backgroundColor = Color(red: 250/255, green: 247/255, blue: 240/255)
@@ -57,13 +56,14 @@ struct HomeView: View {
     }
     
     // Current card
+    private var safeCardIndex: Int {
+        guard !cardManager.cards.isEmpty else { return 0 }
+        return max(0, min(currentCardIndex, cardManager.cards.count - 1))
+    }
+    
     private var currentCard: CardInstance? {
-        guard !cardManager.cards.isEmpty,
-              currentCardIndex >= 0,
-              currentCardIndex < cardManager.cards.count else {
-            return nil
-        }
-        return cardManager.cards[currentCardIndex]
+        guard !cardManager.cards.isEmpty else { return nil }
+        return cardManager.cards[safeCardIndex]
     }
     
     var body: some View {
@@ -105,10 +105,10 @@ struct HomeView: View {
                 // 所有卡片 - 统一渲染，通过位置变化实现动画
                 if !cardManager.cards.isEmpty {
                     ForEach(Array(cardManager.cards.enumerated()), id: \.element.id) { index, card in
-                        let isCurrent = index == currentCardIndex
+                        let isCurrent = index == safeCardIndex
                         
                         // 计算位置
-                        let baseOffset = CGFloat(index - currentCardIndex) * (cardWidth + cardSpacing)
+                        let baseOffset = CGFloat(index - safeCardIndex) * (cardWidth + cardSpacing)
                         
                         // 当前卡片的目标位置和缩放
                         let targetX: CGFloat = {
@@ -173,7 +173,7 @@ struct HomeView: View {
                                 }
                                 return 1.0
                             }
-                            if abs(index - currentCardIndex) > 2 { return 0 }
+                            if abs(index - safeCardIndex) > 2 { return 0 }
                             return isCurrent ? 1.0 : 0.55
                         }()
                         
@@ -185,12 +185,13 @@ struct HomeView: View {
                             isPiPActive: pipManager.isPiPActive && isCurrent,
                             isPreparing: pipManager.isPreparingPiP && isCurrent
                         )
+                        .allowsHitTesting(false)  // 让手势穿透卡片
                         .scaleEffect(targetScale)
                         .position(x: targetX, y: targetY)
                         .opacity(targetOpacity)
-                        .zIndex(isCurrent ? 10 : Double(cardManager.cards.count - abs(index - currentCardIndex)))
+                        .zIndex(isCurrent ? 10 : Double(cardManager.cards.count - abs(index - safeCardIndex)))
                         .animation(.spring(response: 0.5, dampingFraction: 0.8), value: inCorner)
-                        .animation(.interpolatingSpring(stiffness: 300, damping: 30), value: currentCardIndex)
+                        .animation(.interpolatingSpring(stiffness: 300, damping: 30), value: safeCardIndex)
                     }
                 }
                 
@@ -237,8 +238,6 @@ struct HomeView: View {
                 // Statistics overlay with handle - 随上滑动作入场，下滑出场
                 if pipManager.isPiPActive || pipManager.isPreparingPiP || swipeUpProgress > 0 {
                     let effectiveProgress = swipeUpProgress * (1 - swipeDownProgress)
-                    // 判断当前是否为专注房间卡片且 PiP 激活
-                    let isFocusRoomPiPActive = pipManager.isPiPActive && currentCard?.providerType == .focusRoom
                     
                     VStack(spacing: 0) {
                         Spacer()
@@ -246,28 +245,6 @@ struct HomeView: View {
                         VStack(spacing: 12) {
                             // 横杠指示器（在统计数据上方）
                             SwipeIndicator(progress: swipeUpProgress)
-                            
-                            // 专注房间入口（仅在专注房间 PiP 激活时显示在数据区域上方）
-                            if isFocusRoomPiPActive {
-                                Button {
-                                    showFocusRoom = true
-                                } label: {
-                                    HStack(spacing: 8) {
-                                        Image(systemName: "person.2.fill")
-                                            .font(.system(size: 15))
-                                        Text(FocusRoomService.shared.currentRoom?.name ?? "专注房间")
-                                            .font(.system(size: 14, weight: .medium))
-                                        Spacer()
-                                        Image(systemName: "chevron.right")
-                                            .font(.system(size: 12, weight: .medium))
-                                    }
-                                    .foregroundStyle(.black.opacity(0.6))
-                                    .padding(.horizontal, 16)
-                                    .padding(.vertical, 12)
-                                    .background(.ultraThinMaterial)
-                                    .cornerRadius(12)
-                                }
-                            }
                             
                             // 统计数据内容
                             statisticsContent(safeArea: safeArea)
@@ -303,19 +280,12 @@ struct HomeView: View {
         .onChange(of: pipManager.isPiPActive) { isActive in
             if !isActive {
                 currentProvider = nil
-            } else {
-                // PiP 启动成功后，如果是专注房间卡片且未加入房间，自动弹出房间弹窗
-                if currentCard?.providerType == .focusRoom && !FocusRoomService.shared.isInRoom {
-                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
-                        showFocusRoom = true
-                    }
-                }
             }
         }
         .sheet(isPresented: $showAddCard) {
             AddCardSheet(
                 cardManager: cardManager,
-                insertAfterIndex: currentCardIndex
+                insertAfterIndex: safeCardIndex
             ) { newIndex in
                 // Navigate to newly added card
                 if let index = newIndex {
@@ -343,11 +313,6 @@ struct HomeView: View {
             }
             .presentationDetents([.fraction(0.8)])
             .presentationDragIndicator(.visible)
-        }
-        .sheet(isPresented: $showFocusRoom) {
-            FocusRoomView()
-                .presentationDetents([.fraction(0.7)])
-                .presentationDragIndicator(.visible)
         }
     }
     
@@ -648,7 +613,16 @@ struct HomeView: View {
         case .horizontal:
             // 禁止在上滑、PiP准备中、PiP激活时的左右滑动
             if !pipManager.isPiPActive && !pipManager.isPreparingPiP && cardSwipeState != .swipingUp && cardManager.cards.count > 1 {
-                dragOffset = CGSize(width: translation.width, height: 0)
+                let width = translation.width
+                let idx = safeCardIndex
+                // 边界限制：第一张不能右滑，最后一张不能左滑
+                if idx <= 0 && width > 0 {
+                    dragOffset = CGSize(width: 0, height: 0)
+                } else if idx >= cardManager.cards.count - 1 && width < 0 {
+                    dragOffset = CGSize(width: 0, height: 0)
+                } else {
+                    dragOffset = CGSize(width: width, height: 0)
+                }
             }
             
         case .vertical:
@@ -698,12 +672,19 @@ struct HomeView: View {
             if !pipManager.isPiPActive && !pipManager.isPreparingPiP && cardManager.cards.count > 1 {
                 let threshold: CGFloat = screenSize.width * 0.15
                 let velocityThreshold: CGFloat = 400
+                
+                let isSwipingLeft = translation.width < -threshold || velocity.width < -velocityThreshold
+                let isSwipingRight = translation.width > threshold || velocity.width > velocityThreshold
+                
+                let idx = safeCardIndex
 
-                withAnimation(.interpolatingSpring(stiffness: 300, damping: 30)) {
-                    if translation.width < -threshold || velocity.width < -velocityThreshold {
-                        currentCardIndex = min(currentCardIndex + 1, cardManager.cards.count - 1)
-                    } else if translation.width > threshold || velocity.width > velocityThreshold {
-                        currentCardIndex = max(currentCardIndex - 1, 0)
+                if isSwipingLeft && idx < cardManager.cards.count - 1 {
+                    withAnimation(.interpolatingSpring(stiffness: 300, damping: 30)) {
+                        currentCardIndex = idx + 1
+                    }
+                } else if isSwipingRight && idx > 0 {
+                    withAnimation(.interpolatingSpring(stiffness: 300, damping: 30)) {
+                        currentCardIndex = idx - 1
                     }
                 }
             }
@@ -808,9 +789,6 @@ struct HomeView: View {
             }
         }
         
-        // For focus room provider, allow starting PiP even without room
-        // Provider will show "暂未加入房间" state
-        
         print("[HomeView] Starting PiP for card: \(card.id)")
         
         pipViewId = UUID()
@@ -842,9 +820,6 @@ struct HomeView: View {
             }
         }
         
-        // For focus room provider, allow preparing PiP even without room
-        // Provider will show "暂未加入房间" state
-        
         print("[HomeView] Early preparing PiP for card: \(card.id)")
         
         pipViewId = UUID()
@@ -871,14 +846,14 @@ struct HomeView: View {
             pipManager.stopPiP()
         }
         
-        // Adjust index before deletion
-        let wasLastCard = currentCardIndex == cardManager.cards.count - 1
-        
+        let idx = safeCardIndex
         cardManager.removeCard(id: card.id)
         
-        // Update index
-        if wasLastCard && currentCardIndex > 0 {
-            currentCardIndex -= 1
+        // 删除后 clamp index
+        if !cardManager.cards.isEmpty {
+            currentCardIndex = min(idx, cardManager.cards.count - 1)
+        } else {
+            currentCardIndex = 0
         }
     }
     

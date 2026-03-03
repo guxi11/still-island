@@ -54,7 +54,29 @@ final class CardManager: ObservableObject {
         )
 
         do {
-            cards = try context.fetch(descriptor)
+            let allCards = try context.fetch(descriptor)
+            
+            // Filter out cards with invalid provider types
+            // This prevents "blank/ghost" cards from appearing in the UI
+            var validCards: [CardInstance] = []
+            var hasChanges = false
+            
+            for card in allCards {
+                if PiPProviderType(rawValue: card.providerTypeRaw) != nil {
+                    validCards.append(card)
+                } else {
+                    // Delete invalid card
+                    context.delete(card)
+                    hasChanges = true
+                    print("[CardManager] Deleted invalid card: \(card.id)")
+                }
+            }
+            
+            if hasChanges {
+                try? context.save()
+            }
+            
+            cards = validCards
 
             // If no cards exist, create default set
             if cards.isEmpty {
