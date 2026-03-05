@@ -27,6 +27,7 @@ protocol HardwareAcceleratedRenderer: AnyObject {
 
 /// Uses AVPlayer with AVPlayerItemVideoOutput for hardware-decoded video frames.
 /// Outputs fixed-size frames (2:1 aspect ratio) with cover-style cropping.
+/// Video is played muted by default.
 final class VideoHardwareRenderer: HardwareAcceleratedRenderer {
     
     // Fixed output size for PiP (2:1 aspect ratio)
@@ -50,12 +51,34 @@ final class VideoHardwareRenderer: HardwareAcceleratedRenderer {
     private var outputPixelBufferPool: CVPixelBufferPool?
     private var outputFormatDescription: CMVideoFormatDescription?
     
-    // Core Image context for efficient processing
-    private let ciContext = CIContext(options: [.useSoftwareRenderer: false])
+    // Core Image context for efficient GPU processing
+    private let ciContext: CIContext
+    
+    // 缓存的变换矩阵，避免每帧重复计算
+    private var cachedRotationTransform: CGAffineTransform?
+    private var cachedCropRect: CGRect?
+    private var cachedScaleTransform: CGAffineTransform?
+    private var lastSourceSize: CGSize = .zero
+    
+    // 帧率控制
+    private var targetFrameRate: Int = 15
+    private var lastFrameTime: CFTimeInterval = 0
+    private var frameInterval: CFTimeInterval = 1.0 / 15.0
     
     init(videoURL: URL, displayLayer: AVSampleBufferDisplayLayer) {
         self.videoURL = videoURL
         self.displayLayer = displayLayer
+        
+        // 创建GPU加速的CIContext
+        if let metalDevice = MTLCreateSystemDefaultDevice() {
+            self.ciContext = CIContext(mtlDevice: metalDevice, options: [
+                .cacheIntermediates: false,  // 不缓存中间结果，节省内存
+                .priorityRequestLow: true    // 低优先级，避免影响主线程
+            ])
+        } else {
+            self.ciContext = CIContext(options: [.useSoftwareRenderer: false])
+        }
+        
         setupDisplayLayer()
         setupOutputPixelBufferPool()
         loadVideoInfo()
@@ -142,8 +165,9 @@ final class VideoHardwareRenderer: HardwareAcceleratedRenderer {
         videoOutput = AVPlayerItemVideoOutput(pixelBufferAttributes: outputSettings)
         playerItem?.add(videoOutput!)
         
-        // Create player
+        // Create player and set to muted
         player = AVPlayer(playerItem: playerItem)
+        player?.isMuted = true  // 静音播放
         player?.actionAtItemEnd = .none
         
         // Setup looping
@@ -159,13 +183,21 @@ final class VideoHardwareRenderer: HardwareAcceleratedRenderer {
             }
         }
         
-        // Start display link at 15fps
+        // Start display link with frame rate control
         displayLink = CADisplayLink(target: self, selector: #selector(displayLinkFired))
-        displayLink?.preferredFramesPerSecond = 15
+        if #available(iOS 15.0, *) {
+            displayLink?.preferredFrameRateRange = CAFrameRateRange(
+                minimum: Float(targetFrameRate),
+                maximum: Float(targetFrameRate),
+                preferred: Float(targetFrameRate)
+            )
+        } else {
+            displayLink?.preferredFramesPerSecond = targetFrameRate
+        }
         displayLink?.add(to: .main, forMode: .common)
         
         player?.play()
-        print("[VideoHardwareRenderer] Started with fixed output size: \(Self.outputWidth)x\(Self.outputHeight)")
+        print("[VideoHardwareRenderer] Started (muted) with fixed output size: \(Self.outputWidth)x\(Self.outputHeight), \(targetFrameRate)fps")
     }
     
     func stop() {
@@ -184,14 +216,19 @@ final class VideoHardwareRenderer: HardwareAcceleratedRenderer {
     }
     
     @objc private func displayLinkFired(_ link: CADisplayLink) {
+        // 帧率限制
+        let currentTime = link.timestamp
+        guard currentTime - lastFrameTime >= frameInterval else { return }
+        lastFrameTime = currentTime
+        
         guard let videoOutput = videoOutput,
               let playerItem = playerItem else { return }
         
-        let currentTime = playerItem.currentTime()
+        let itemTime = playerItem.currentTime()
         
         // Check if new frame is available
-        guard videoOutput.hasNewPixelBuffer(forItemTime: currentTime),
-              let sourcePixelBuffer = videoOutput.copyPixelBuffer(forItemTime: currentTime, itemTimeForDisplay: nil) else {
+        guard videoOutput.hasNewPixelBuffer(forItemTime: itemTime),
+              let sourcePixelBuffer = videoOutput.copyPixelBuffer(forItemTime: itemTime, itemTimeForDisplay: nil) else {
             return
         }
         
@@ -218,7 +255,7 @@ final class VideoHardwareRenderer: HardwareAcceleratedRenderer {
         }
     }
     
-    /// 处理视频帧：应用旋转并裁剪到固定尺寸
+    /// 处理视频帧：应用旋转并裁剪到固定尺寸（优化版，缓存变换矩阵）
     private func processFrame(_ sourceBuffer: CVPixelBuffer) -> CVPixelBuffer? {
         guard let pool = outputPixelBufferPool else { return nil }
         
@@ -232,45 +269,42 @@ final class VideoHardwareRenderer: HardwareAcceleratedRenderer {
         // 获取源图像尺寸
         let sourceWidth = CGFloat(CVPixelBufferGetWidth(sourceBuffer))
         let sourceHeight = CGFloat(CVPixelBufferGetHeight(sourceBuffer))
+        let currentSourceSize = CGSize(width: sourceWidth, height: sourceHeight)
+        
+        // 如果源尺寸变化，重新计算变换矩阵
+        if currentSourceSize != lastSourceSize {
+            lastSourceSize = currentSourceSize
+            cachedRotationTransform = nil
+            cachedCropRect = nil
+            cachedScaleTransform = nil
+        }
         
         // 应用视频的旋转变换
-        // 视频的 preferredTransform 需要正确应用以获得正确的方向
         if videoTransform != .identity {
-            // 计算旋转角度
-            let angle = atan2(videoTransform.b, videoTransform.a)
-            
-            // 根据旋转角度判断视频方向
-            // 90度：竖屏视频（宽高需要交换）
-            // -90度或270度：竖屏视频（反向）
-            // 180度：倒置
-            // 0度：正常横屏
-            
-            let rotatedImage: CIImage
-            
-            // 将角度标准化到 [0, 2π)
-            let normalizedAngle = angle < 0 ? angle + 2 * .pi : angle
-            let degrees = Int(round(normalizedAngle * 180 / .pi))
-            
-            switch degrees {
-            case 90:
-                // 竖屏视频，顺时针旋转90度 -> 需要逆时针旋转90度来纠正
-                rotatedImage = ciImage.transformed(by: CGAffineTransform(rotationAngle: -.pi / 2))
-            case 180:
-                // 倒置视频
-                rotatedImage = ciImage.transformed(by: CGAffineTransform(rotationAngle: .pi))
-            case 270:
-                // 竖屏视频，逆时针旋转90度 -> 需要顺时针旋转90度来纠正
-                rotatedImage = ciImage.transformed(by: CGAffineTransform(rotationAngle: .pi / 2))
-            default:
-                // 正常横屏或其他角度
-                rotatedImage = ciImage
+            if cachedRotationTransform == nil {
+                let angle = atan2(videoTransform.b, videoTransform.a)
+                let normalizedAngle = angle < 0 ? angle + 2 * .pi : angle
+                let degrees = Int(round(normalizedAngle * 180 / .pi))
+                
+                switch degrees {
+                case 90:
+                    cachedRotationTransform = CGAffineTransform(rotationAngle: -.pi / 2)
+                case 180:
+                    cachedRotationTransform = CGAffineTransform(rotationAngle: .pi)
+                case 270:
+                    cachedRotationTransform = CGAffineTransform(rotationAngle: .pi / 2)
+                default:
+                    cachedRotationTransform = .identity
+                }
             }
             
-            // 将旋转后的图像移动到原点
-            ciImage = rotatedImage.transformed(by: CGAffineTransform(
-                translationX: -rotatedImage.extent.origin.x,
-                y: -rotatedImage.extent.origin.y
-            ))
+            if let transform = cachedRotationTransform, transform != .identity {
+                let rotatedImage = ciImage.transformed(by: transform)
+                ciImage = rotatedImage.transformed(by: CGAffineTransform(
+                    translationX: -rotatedImage.extent.origin.x,
+                    y: -rotatedImage.extent.origin.y
+                ))
+            }
         }
         
         // 现在 ciImage 是正确方向的图像，获取其尺寸
@@ -283,23 +317,23 @@ final class VideoHardwareRenderer: HardwareAcceleratedRenderer {
         let targetHeight = CGFloat(Self.outputHeight)
         let targetAspect = targetWidth / targetHeight  // 2:1
         
-        // 计算 cover 裁剪区域
-        let imageAspect = imageWidth / imageHeight
-        
-        let cropRect: CGRect
-        if imageAspect > targetAspect {
-            // 图像更宽，裁剪左右
-            let cropWidth = imageHeight * targetAspect
-            let cropX = (imageWidth - cropWidth) / 2
-            cropRect = CGRect(x: imageExtent.origin.x + cropX, y: imageExtent.origin.y, width: cropWidth, height: imageHeight)
-        } else {
-            // 图像更高，裁剪上下
-            let cropHeight = imageWidth / targetAspect
-            let cropY = (imageHeight - cropHeight) / 2
-            cropRect = CGRect(x: imageExtent.origin.x, y: imageExtent.origin.y + cropY, width: imageWidth, height: cropHeight)
+        // 计算 cover 裁剪区域（缓存）
+        if cachedCropRect == nil {
+            let imageAspect = imageWidth / imageHeight
+            
+            if imageAspect > targetAspect {
+                let cropWidth = imageHeight * targetAspect
+                let cropX = (imageWidth - cropWidth) / 2
+                cachedCropRect = CGRect(x: imageExtent.origin.x + cropX, y: imageExtent.origin.y, width: cropWidth, height: imageHeight)
+            } else {
+                let cropHeight = imageWidth / targetAspect
+                let cropY = (imageHeight - cropHeight) / 2
+                cachedCropRect = CGRect(x: imageExtent.origin.x, y: imageExtent.origin.y + cropY, width: imageWidth, height: cropHeight)
+            }
         }
         
         // 裁剪
+        guard let cropRect = cachedCropRect else { return nil }
         var croppedImage = ciImage.cropped(to: cropRect)
         
         // 移动到原点
@@ -308,10 +342,14 @@ final class VideoHardwareRenderer: HardwareAcceleratedRenderer {
             y: -croppedImage.extent.origin.y
         ))
         
-        // 缩放到目标尺寸
-        let scaleX = targetWidth / croppedImage.extent.width
-        let scaleY = targetHeight / croppedImage.extent.height
-        let scaledImage = croppedImage.transformed(by: CGAffineTransform(scaleX: scaleX, y: scaleY))
+        // 缩放到目标尺寸（缓存）
+        if cachedScaleTransform == nil {
+            let scaleX = targetWidth / croppedImage.extent.width
+            let scaleY = targetHeight / croppedImage.extent.height
+            cachedScaleTransform = CGAffineTransform(scaleX: scaleX, y: scaleY)
+        }
+        
+        let scaledImage = croppedImage.transformed(by: cachedScaleTransform!)
         
         // 渲染到输出 buffer
         ciContext.render(scaledImage, to: output)
@@ -344,21 +382,52 @@ final class VideoHardwareRenderer: HardwareAcceleratedRenderer {
 
 // MARK: - Camera Hardware Renderer
 
-/// Uses AVCaptureVideoDataOutput for direct pixel buffer access (no preview layer conversion)
+/// Uses AVCaptureVideoDataOutput for direct pixel buffer access (no preview layer conversion).
+/// Outputs fixed-size frames (2:1 aspect ratio) with cover-style cropping to match other providers.
 final class CameraHardwareRenderer: NSObject, HardwareAcceleratedRenderer, AVCaptureVideoDataOutputSampleBufferDelegate {
+    
+    // Fixed output size for PiP (2:1 aspect ratio, same as VideoHardwareRenderer)
+    private static let outputWidth: Int = 400
+    private static let outputHeight: Int = 200
     
     let displayLayer: AVSampleBufferDisplayLayer
     private var captureSession: AVCaptureSession?
     private let outputQueue = DispatchQueue(label: "com.porthole.camera.output", qos: .userInitiated)
     
+    // Pixel buffer pool for output
+    private var outputPixelBufferPool: CVPixelBufferPool?
+    private var outputFormatDescription: CMVideoFormatDescription?
+    
+    // Core Image context for efficient GPU processing
+    private let ciContext: CIContext
+    
+    // Cached transforms for performance
+    private var cachedCropRect: CGRect?
+    private var cachedScaleTransform: CGAffineTransform?
+    private var lastSourceSize: CGSize = .zero
+    
     init(displayLayer: AVSampleBufferDisplayLayer) {
         self.displayLayer = displayLayer
+        
+        // Create GPU-accelerated CIContext
+        if let metalDevice = MTLCreateSystemDefaultDevice() {
+            self.ciContext = CIContext(mtlDevice: metalDevice, options: [
+                .cacheIntermediates: false,
+                .priorityRequestLow: true
+            ])
+        } else {
+            self.ciContext = CIContext(options: [.useSoftwareRenderer: false])
+        }
+        
         super.init()
         setupDisplayLayer()
+        setupOutputPixelBufferPool()
     }
     
     private func setupDisplayLayer() {
-        displayLayer.videoGravity = .resizeAspectFill
+        // Use resizeAspect since we're outputting pre-cropped frames
+        displayLayer.videoGravity = .resizeAspect
+        displayLayer.backgroundColor = UIColor.black.cgColor
         
         var timebase: CMTimebase?
         CMTimebaseCreateWithSourceClock(
@@ -373,10 +442,36 @@ final class CameraHardwareRenderer: NSObject, HardwareAcceleratedRenderer, AVCap
         }
     }
     
+    private func setupOutputPixelBufferPool() {
+        let attributes: [String: Any] = [
+            kCVPixelBufferPixelFormatTypeKey as String: kCVPixelFormatType_32BGRA,
+            kCVPixelBufferWidthKey as String: Self.outputWidth,
+            kCVPixelBufferHeightKey as String: Self.outputHeight,
+            kCVPixelBufferIOSurfacePropertiesKey as String: [:],
+            kCVPixelBufferCGImageCompatibilityKey as String: true,
+            kCVPixelBufferCGBitmapContextCompatibilityKey as String: true
+        ]
+        
+        CVPixelBufferPoolCreate(nil, nil, attributes as CFDictionary, &outputPixelBufferPool)
+        
+        // Create format description
+        if let pool = outputPixelBufferPool {
+            var pixelBuffer: CVPixelBuffer?
+            CVPixelBufferPoolCreatePixelBuffer(nil, pool, &pixelBuffer)
+            if let buffer = pixelBuffer {
+                CMVideoFormatDescriptionCreateForImageBuffer(
+                    allocator: kCFAllocatorDefault,
+                    imageBuffer: buffer,
+                    formatDescriptionOut: &outputFormatDescription
+                )
+            }
+        }
+    }
+    
     func start() {
         let session = AVCaptureSession()
-        // Use low preset for better performance (480p)
-        session.sessionPreset = .low
+        // Use medium preset for better quality (720p)
+        session.sessionPreset = .medium
         
         // Enable multitasking for background operation
         if #available(iOS 16.0, *) {
@@ -399,7 +494,7 @@ final class CameraHardwareRenderer: NSObject, HardwareAcceleratedRenderer, AVCap
             camera.activeVideoMinFrameDuration = CMTime(value: 1, timescale: 15)
             camera.activeVideoMaxFrameDuration = CMTime(value: 1, timescale: 15)
             camera.unlockForConfiguration()
-            print("[CameraHardwareRenderer] Camera configured: 15fps, low preset")
+            print("[CameraHardwareRenderer] Camera configured: 15fps, medium preset")
         } catch {
             print("[CameraHardwareRenderer] Failed to configure camera frame rate: \(error)")
         }
@@ -408,18 +503,15 @@ final class CameraHardwareRenderer: NSObject, HardwareAcceleratedRenderer, AVCap
         
         // Add video data output for direct pixel buffer access
         let videoOutput = AVCaptureVideoDataOutput()
-        // Reduce resolution by setting max dimensions
         videoOutput.videoSettings = [
-            kCVPixelBufferPixelFormatTypeKey as String: kCVPixelFormatType_32BGRA,
-            kCVPixelBufferWidthKey as String: 480,
-            kCVPixelBufferHeightKey as String: 360
+            kCVPixelBufferPixelFormatTypeKey as String: kCVPixelFormatType_32BGRA
         ]
         videoOutput.setSampleBufferDelegate(self, queue: outputQueue)
         
         if session.canAddOutput(videoOutput) {
             session.addOutput(videoOutput)
             
-            // Set video orientation
+            // Set video orientation to portrait (90 degrees)
             if let connection = videoOutput.connection(with: .video) {
                 if connection.isVideoRotationAngleSupported(90) {
                     connection.videoRotationAngle = 90
@@ -431,7 +523,7 @@ final class CameraHardwareRenderer: NSObject, HardwareAcceleratedRenderer, AVCap
         
         outputQueue.async {
             session.startRunning()
-            print("[CameraHardwareRenderer] Started with direct pixel buffer output")
+            print("[CameraHardwareRenderer] Started with fixed output size: \(Self.outputWidth)x\(Self.outputHeight)")
         }
     }
     
@@ -442,8 +534,122 @@ final class CameraHardwareRenderer: NSObject, HardwareAcceleratedRenderer, AVCap
     
     // AVCaptureVideoDataOutputSampleBufferDelegate
     func captureOutput(_ output: AVCaptureOutput, didOutput sampleBuffer: CMSampleBuffer, from connection: AVCaptureConnection) {
-        // Enqueue sample buffer directly to display layer
-        displayLayer.enqueue(sampleBuffer)
+        guard let sourcePixelBuffer = CMSampleBufferGetImageBuffer(sampleBuffer) else {
+            return
+        }
+        
+        // Process frame: cover-crop to fixed 2:1 size
+        guard let outputPixelBuffer = processFrame(sourcePixelBuffer) else {
+            return
+        }
+        
+        // Create sample buffer with processed frame
+        guard let outputSampleBuffer = createSampleBuffer(from: outputPixelBuffer) else {
+            return
+        }
+        
+        // Check layer status and flush if failed
+        if displayLayer.status == .failed {
+            displayLayer.flush()
+        }
+        
+        displayLayer.enqueue(outputSampleBuffer)
+    }
+    
+    /// Process camera frame: apply cover-style crop to fixed 2:1 aspect ratio
+    private func processFrame(_ sourceBuffer: CVPixelBuffer) -> CVPixelBuffer? {
+        guard let pool = outputPixelBufferPool else { return nil }
+        
+        var outputBuffer: CVPixelBuffer?
+        let status = CVPixelBufferPoolCreatePixelBuffer(nil, pool, &outputBuffer)
+        guard status == kCVReturnSuccess, let output = outputBuffer else { return nil }
+        
+        // Create CIImage from source
+        let ciImage = CIImage(cvPixelBuffer: sourceBuffer)
+        
+        // Get source image size
+        let sourceWidth = CGFloat(CVPixelBufferGetWidth(sourceBuffer))
+        let sourceHeight = CGFloat(CVPixelBufferGetHeight(sourceBuffer))
+        let currentSourceSize = CGSize(width: sourceWidth, height: sourceHeight)
+        
+        // Recalculate transforms if source size changed
+        if currentSourceSize != lastSourceSize {
+            lastSourceSize = currentSourceSize
+            cachedCropRect = nil
+            cachedScaleTransform = nil
+        }
+        
+        // Target dimensions
+        let targetWidth = CGFloat(Self.outputWidth)
+        let targetHeight = CGFloat(Self.outputHeight)
+        let targetAspect = targetWidth / targetHeight  // 2:1
+        
+        // Calculate cover crop region (cached)
+        if cachedCropRect == nil {
+            let imageExtent = ciImage.extent
+            let imageWidth = imageExtent.width
+            let imageHeight = imageExtent.height
+            let imageAspect = imageWidth / imageHeight
+            
+            if imageAspect > targetAspect {
+                // Source is wider - crop left and right
+                let cropWidth = imageHeight * targetAspect
+                let cropX = (imageWidth - cropWidth) / 2
+                cachedCropRect = CGRect(x: imageExtent.origin.x + cropX, y: imageExtent.origin.y, width: cropWidth, height: imageHeight)
+            } else {
+                // Source is taller - crop top and bottom
+                let cropHeight = imageWidth / targetAspect
+                let cropY = (imageHeight - cropHeight) / 2
+                cachedCropRect = CGRect(x: imageExtent.origin.x, y: imageExtent.origin.y + cropY, width: imageWidth, height: cropHeight)
+            }
+        }
+        
+        // Apply crop
+        guard let cropRect = cachedCropRect else { return nil }
+        var croppedImage = ciImage.cropped(to: cropRect)
+        
+        // Translate to origin
+        croppedImage = croppedImage.transformed(by: CGAffineTransform(
+            translationX: -croppedImage.extent.origin.x,
+            y: -croppedImage.extent.origin.y
+        ))
+        
+        // Calculate scale transform (cached)
+        if cachedScaleTransform == nil {
+            let scaleX = targetWidth / croppedImage.extent.width
+            let scaleY = targetHeight / croppedImage.extent.height
+            cachedScaleTransform = CGAffineTransform(scaleX: scaleX, y: scaleY)
+        }
+        
+        // Apply scale
+        let scaledImage = croppedImage.transformed(by: cachedScaleTransform!)
+        
+        // Render to output buffer
+        ciContext.render(scaledImage, to: output)
+        
+        return output
+    }
+    
+    private func createSampleBuffer(from pixelBuffer: CVPixelBuffer) -> CMSampleBuffer? {
+        guard let formatDesc = outputFormatDescription else { return nil }
+        
+        let hostTime = CMClockGetTime(CMClockGetHostTimeClock())
+        var timingInfo = CMSampleTimingInfo(
+            duration: CMTime(value: 1, timescale: 15),
+            presentationTimeStamp: hostTime,
+            decodeTimeStamp: .invalid
+        )
+        
+        var sampleBuffer: CMSampleBuffer?
+        CMSampleBufferCreateReadyWithImageBuffer(
+            allocator: kCFAllocatorDefault,
+            imageBuffer: pixelBuffer,
+            formatDescription: formatDesc,
+            sampleTiming: &timingInfo,
+            sampleBufferOut: &sampleBuffer
+        )
+        
+        return sampleBuffer
     }
 }
 

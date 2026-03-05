@@ -11,6 +11,82 @@ import UIKit
 /// when the user returns after being away from their phone.
 final class CelebrationView: UIView {
     
+    // MARK: - Static Cache for Confetti Images
+    
+    /// 预缓存的confetti形状图片，避免每次创建24个CGImage
+    private static var cachedConfettiImages: [String: CGImage] = [:]
+    private static let cacheQueue = DispatchQueue(label: "com.porthole.confetti.cache")
+    private static var isCacheInitialized = false
+    
+    /// 预加载confetti图片缓存（可在app启动时调用）
+    static func preloadCache() {
+        cacheQueue.async {
+            guard !isCacheInitialized else { return }
+            isCacheInitialized = true
+            
+            let colors: [UIColor] = [
+                UIColor(red: 1.0, green: 0.35, blue: 0.35, alpha: 1.0),
+                UIColor(red: 1.0, green: 0.75, blue: 0.2, alpha: 1.0),
+                UIColor(red: 1.0, green: 0.9, blue: 0.3, alpha: 1.0),
+                UIColor(red: 0.4, green: 0.9, blue: 0.5, alpha: 1.0),
+                UIColor(red: 0.4, green: 0.75, blue: 1.0, alpha: 1.0),
+                UIColor(red: 0.85, green: 0.5, blue: 1.0, alpha: 1.0),
+                UIColor(red: 1.0, green: 0.5, blue: 0.75, alpha: 1.0),
+                UIColor.white,
+            ]
+            
+            for (index, color) in colors.enumerated() {
+                // Circle
+                if let image = createCircleImageStatic(size: CGSize(width: 8, height: 8), color: color) {
+                    cachedConfettiImages["circle_\(index)"] = image
+                }
+                // Triangle
+                if let image = createTriangleImageStatic(size: CGSize(width: 10, height: 10), color: color) {
+                    cachedConfettiImages["triangle_\(index)"] = image
+                }
+                // Rectangle
+                if let image = createRectangleImageStatic(size: CGSize(width: 6, height: 12), color: color) {
+                    cachedConfettiImages["rectangle_\(index)"] = image
+                }
+            }
+            
+            print("[CelebrationView] Confetti cache initialized with \(cachedConfettiImages.count) images")
+        }
+    }
+    
+    // MARK: - Static Image Creation Methods
+    
+    private static func createCircleImageStatic(size: CGSize, color: UIColor) -> CGImage? {
+        UIGraphicsBeginImageContextWithOptions(size, false, 1.0)  // 使用scale 1.0节省内存
+        defer { UIGraphicsEndImageContext() }
+        guard let context = UIGraphicsGetCurrentContext() else { return nil }
+        context.setFillColor(color.cgColor)
+        context.fillEllipse(in: CGRect(origin: .zero, size: size))
+        return UIGraphicsGetImageFromCurrentImageContext()?.cgImage
+    }
+    
+    private static func createTriangleImageStatic(size: CGSize, color: UIColor) -> CGImage? {
+        UIGraphicsBeginImageContextWithOptions(size, false, 1.0)
+        defer { UIGraphicsEndImageContext() }
+        guard let context = UIGraphicsGetCurrentContext() else { return nil }
+        context.setFillColor(color.cgColor)
+        context.move(to: CGPoint(x: size.width / 2, y: 0))
+        context.addLine(to: CGPoint(x: size.width, y: size.height))
+        context.addLine(to: CGPoint(x: 0, y: size.height))
+        context.closePath()
+        context.fillPath()
+        return UIGraphicsGetImageFromCurrentImageContext()?.cgImage
+    }
+    
+    private static func createRectangleImageStatic(size: CGSize, color: UIColor) -> CGImage? {
+        UIGraphicsBeginImageContextWithOptions(size, false, 1.0)
+        defer { UIGraphicsEndImageContext() }
+        guard let context = UIGraphicsGetCurrentContext() else { return nil }
+        context.setFillColor(color.cgColor)
+        context.fill(CGRect(origin: .zero, size: size))
+        return UIGraphicsGetImageFromCurrentImageContext()?.cgImage
+    }
+    
     // MARK: - Properties
     
     private var emitterLayer: CAEmitterLayer?
@@ -185,6 +261,9 @@ final class CelebrationView: UIView {
     
     // Setup confetti emitter - burst style like fireworks
     private func setupConfettiEmitter() {
+        // 确保缓存已初始化
+        Self.preloadCache()
+        
         let emitter = CAEmitterLayer()
         emitter.emitterPosition = CGPoint(x: bounds.midX, y: -10)
         emitter.emitterShape = .line
@@ -192,30 +271,27 @@ final class CelebrationView: UIView {
         
         var cells: [CAEmitterCell] = []
         
-        // Create confetti cells with different shapes and colors
-        for color in confettiColors {
-            // Small circle sparks (like firework sparks)
-            let sparkCell = createConfettiCell(
-                shape: .circle,
-                color: color,
+        // 使用缓存的图片创建confetti cells
+        for index in 0..<confettiColors.count {
+            // Small circle sparks
+            let sparkCell = createConfettiCellFromCache(
+                cacheKey: "circle_\(index)",
                 birthRate: 6,
                 scale: 0.08
             )
             cells.append(sparkCell)
             
             // Triangle confetti
-            let triangleCell = createConfettiCell(
-                shape: .triangle,
-                color: color,
+            let triangleCell = createConfettiCellFromCache(
+                cacheKey: "triangle_\(index)",
                 birthRate: 3,
                 scale: 0.1
             )
             cells.append(triangleCell)
             
-            // Rectangle confetti (like ribbon pieces)
-            let rectangleCell = createConfettiCell(
-                shape: .rectangle,
-                color: color,
+            // Rectangle confetti
+            let rectangleCell = createConfettiCellFromCache(
+                cacheKey: "rectangle_\(index)",
                 birthRate: 2,
                 scale: 0.08
             )
@@ -227,105 +303,40 @@ final class CelebrationView: UIView {
         emitterLayer = emitter
     }
     
-    private enum ConfettiShape {
-        case triangle
-        case rectangle
-        case circle
-    }
-    
-    private func createConfettiCell(
-        shape: ConfettiShape,
-        color: UIColor,
+    /// 从缓存创建confetti cell
+    private func createConfettiCellFromCache(
+        cacheKey: String,
         birthRate: Float,
         scale: CGFloat
     ) -> CAEmitterCell {
         let cell = CAEmitterCell()
         
-        // Create shape image
-        switch shape {
-        case .triangle:
-            cell.contents = createTriangleImage(size: CGSize(width: 10, height: 10), color: color)
-        case .rectangle:
-            cell.contents = createRectangleImage(size: CGSize(width: 6, height: 12), color: color)
-        case .circle:
-            cell.contents = createCircleImage(size: CGSize(width: 8, height: 8), color: color)
-        }
+        // 从缓存获取图片
+        cell.contents = Self.cachedConfettiImages[cacheKey]
         
         cell.birthRate = birthRate
         cell.lifetime = 2.0
         cell.lifetimeRange = 0.5
         
-        // Falling velocity - faster initial burst
         cell.velocity = 120
         cell.velocityRange = 60
         
-        cell.emissionLongitude = .pi  // Downward
-        cell.emissionRange = .pi / 4  // Wider spread for burst effect
+        cell.emissionLongitude = .pi
+        cell.emissionRange = .pi / 4
         
-        // Add horizontal drift for natural movement
         cell.xAcceleration = 0
-        cell.yAcceleration = 50  // Gravity effect
+        cell.yAcceleration = 50
         
         cell.scale = scale
         cell.scaleRange = scale * 0.4
-        cell.scaleSpeed = -0.02  // Slightly shrink as they fall
+        cell.scaleSpeed = -0.02
         
-        // Spinning animation
         cell.spin = .pi * 2
         cell.spinRange = .pi * 3
         
-        // Fade out as they fall
         cell.alphaSpeed = -0.4
         
         return cell
-    }
-    
-    // Create a triangle image
-    private func createTriangleImage(size: CGSize, color: UIColor) -> CGImage? {
-        UIGraphicsBeginImageContextWithOptions(size, false, 0)
-        guard let context = UIGraphicsGetCurrentContext() else { return nil }
-        
-        context.setFillColor(color.cgColor)
-        
-        // Draw triangle
-        context.move(to: CGPoint(x: size.width / 2, y: 0))
-        context.addLine(to: CGPoint(x: size.width, y: size.height))
-        context.addLine(to: CGPoint(x: 0, y: size.height))
-        context.closePath()
-        context.fillPath()
-        
-        let image = UIGraphicsGetImageFromCurrentImageContext()
-        UIGraphicsEndImageContext()
-        
-        return image?.cgImage
-    }
-    
-    // Create a rectangle image (ribbon-like)
-    private func createRectangleImage(size: CGSize, color: UIColor) -> CGImage? {
-        UIGraphicsBeginImageContextWithOptions(size, false, 0)
-        guard let context = UIGraphicsGetCurrentContext() else { return nil }
-        
-        context.setFillColor(color.cgColor)
-        context.fill(CGRect(origin: .zero, size: size))
-        
-        let image = UIGraphicsGetImageFromCurrentImageContext()
-        UIGraphicsEndImageContext()
-        
-        return image?.cgImage
-    }
-    
-    // Create a circle image (spark-like)
-    private func createCircleImage(size: CGSize, color: UIColor) -> CGImage? {
-        UIGraphicsBeginImageContextWithOptions(size, false, 0)
-        guard let context = UIGraphicsGetCurrentContext() else { return nil }
-        
-        context.setFillColor(color.cgColor)
-        context.fillEllipse(in: CGRect(origin: .zero, size: size))
-        
-        let image = UIGraphicsGetImageFromCurrentImageContext()
-        UIGraphicsEndImageContext()
-        
-        return image?.cgImage
     }
     
     private func animateLabelsIn() {

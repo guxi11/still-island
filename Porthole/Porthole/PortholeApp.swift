@@ -31,6 +31,9 @@ struct PortholeApp: App {
 
                 // Configure CardManager
                 CardManager.shared.configure(with: container)
+                
+                // 预加载CelebrationView的confetti图片缓存
+                CelebrationView.preloadCache()
             }
         } catch {
             fatalError("Could not create ModelContainer: \(error)")

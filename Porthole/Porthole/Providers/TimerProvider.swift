@@ -142,10 +142,7 @@ final class TimerProvider: PiPContentProvider {
         let seconds = totalSeconds % 60
         
         timerLabel.text = String(format: "%02d:%02d:%02d", hours, minutes, seconds)
-        
-        // Force redraw
-        contentView.setNeedsDisplay()
-        timerLabel.setNeedsDisplay()
+        // UILabel会在text改变时自动重绘，无需手动调用setNeedsDisplay
     }
 
     // MARK: - Celebration

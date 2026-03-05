@@ -39,6 +39,13 @@ final class ViewToVideoStreamConverter {
     private var pixelBufferPool: CVPixelBufferPool?
     private var currentSize: CGSize = .zero
     
+    // 固定输出分辨率，避免使用屏幕scale导致分辨率过大
+    private static let outputWidth: Int = 400
+    private static let outputHeight: Int = 200
+    
+    // 缓存CGColorSpace，避免每帧创建
+    private let colorSpace = CGColorSpaceCreateDeviceRGB()
+    
     // Format description for sample buffers
     private var formatDescription: CMVideoFormatDescription?
     
@@ -56,6 +63,9 @@ final class ViewToVideoStreamConverter {
         // 阈值设为帧间隔的3倍，最小5秒，避免低帧率时误判
         return max(5.0, frameInterval * 3.0)
     }
+    
+    // 屏幕检测间隔（秒）- 降低检测频率以节省CPU
+    private static let screenOffCheckInterval: TimeInterval = 2.0
     
     // MARK: - Initialization
     
@@ -211,7 +221,8 @@ final class ViewToVideoStreamConverter {
         stopScreenOffDetection()
         
         // Check periodically if display link has stopped firing
-        screenOffTimer = Timer.scheduledTimer(withTimeInterval: 0.3, repeats: true) { [weak self] _ in
+        // 使用较长间隔（2秒）以减少CPU唤醒次数
+        screenOffTimer = Timer.scheduledTimer(withTimeInterval: Self.screenOffCheckInterval, repeats: true) { [weak self] _ in
             self?.checkScreenState()
         }
         // Run in common mode to work in background
@@ -315,11 +326,12 @@ final class ViewToVideoStreamConverter {
     }
     
     private func setupPixelBufferPool(for size: CGSize) {
-        let scale = UIScreen.main.scale
-        let width = Int(size.width * scale)
-        let height = Int(size.height * scale)
+        // 使用固定输出分辨率，避免过大的缓冲区
+        // PiP窗口实际显示尺寸很小，不需要高分辨率
+        let width = Self.outputWidth
+        let height = Self.outputHeight
         
-        print("[Converter] Setting up pixel buffer pool: \(width)x\(height)")
+        print("[Converter] Setting up pixel buffer pool: \(width)x\(height) (fixed size)")
         
         let attributes: [String: Any] = [
             kCVPixelBufferPixelFormatTypeKey as String: kCVPixelFormatType_32BGRA,
@@ -371,25 +383,37 @@ final class ViewToVideoStreamConverter {
         CVPixelBufferLockBaseAddress(buffer, [])
         defer { CVPixelBufferUnlockBaseAddress(buffer, []) }
         
+        let bufferWidth = CVPixelBufferGetWidth(buffer)
+        let bufferHeight = CVPixelBufferGetHeight(buffer)
+        
         guard let context = CGContext(
             data: CVPixelBufferGetBaseAddress(buffer),
-            width: CVPixelBufferGetWidth(buffer),
-            height: CVPixelBufferGetHeight(buffer),
+            width: bufferWidth,
+            height: bufferHeight,
             bitsPerComponent: 8,
             bytesPerRow: CVPixelBufferGetBytesPerRow(buffer),
-            space: CGColorSpaceCreateDeviceRGB(),
+            space: colorSpace,  // 使用缓存的colorSpace
             bitmapInfo: CGBitmapInfo.byteOrder32Little.rawValue | CGImageAlphaInfo.premultipliedFirst.rawValue
         ) else {
             return nil
         }
         
-        // Scale context to match screen scale and flip y-axis for correct orientation
-        // Core Graphics context origin is bottom-left, UIKit is top-left.
-        // We need to translate and scale to flip it back.
-        let scale = UIScreen.main.scale
-        let height = CGFloat(CVPixelBufferGetHeight(buffer))
+        // 计算缩放比例，将view内容缩放到固定输出尺寸
+        let viewSize = view.bounds.size
+        let scaleX = CGFloat(bufferWidth) / viewSize.width
+        let scaleY = CGFloat(bufferHeight) / viewSize.height
+        let scale = min(scaleX, scaleY)  // 使用较小的缩放比以保持宽高比
         
-        context.translateBy(x: 0, y: height)
+        // 计算居中偏移
+        let scaledWidth = viewSize.width * scale
+        let scaledHeight = viewSize.height * scale
+        let offsetX = (CGFloat(bufferWidth) - scaledWidth) / 2
+        let offsetY = (CGFloat(bufferHeight) - scaledHeight) / 2
+        
+        let height = CGFloat(bufferHeight)
+        
+        // 翻转Y轴并应用缩放
+        context.translateBy(x: offsetX, y: height - offsetY)
         context.scaleBy(x: scale, y: -scale)
         
         // Render directly to the pixel buffer's context

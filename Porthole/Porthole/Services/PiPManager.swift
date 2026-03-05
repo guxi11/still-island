@@ -65,6 +65,10 @@ final class PiPManager: NSObject, ObservableObject {
     
     // 准备超时任务
     private var prepareTimeoutTask: Task<Void, Never>?
+    
+    // 热状态监控
+    private var thermalStateObserver: NSObjectProtocol?
+    private var lowPowerModeObserver: NSObjectProtocol?
 
     // MARK: - Initialization
 
@@ -92,6 +96,112 @@ final class PiPManager: NSObject, ObservableObject {
             name: UIApplication.willEnterForegroundNotification,
             object: nil
         )
+        
+        // 监控设备热状态变化
+        thermalStateObserver = NotificationCenter.default.addObserver(
+            forName: ProcessInfo.thermalStateDidChangeNotification,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            Task { @MainActor in
+                self?.handleThermalStateChange()
+            }
+        }
+        
+        // 监控低电量模式变化
+        lowPowerModeObserver = NotificationCenter.default.addObserver(
+            forName: .NSProcessInfoPowerStateDidChange,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            Task { @MainActor in
+                self?.handlePowerStateChange()
+            }
+        }
+    }
+    
+    /// 清理观察者
+    private func removeLifecycleObservers() {
+        NotificationCenter.default.removeObserver(self, name: UIApplication.didEnterBackgroundNotification, object: nil)
+        NotificationCenter.default.removeObserver(self, name: UIApplication.willEnterForegroundNotification, object: nil)
+        
+        if let observer = thermalStateObserver {
+            NotificationCenter.default.removeObserver(observer)
+            thermalStateObserver = nil
+        }
+        if let observer = lowPowerModeObserver {
+            NotificationCenter.default.removeObserver(observer)
+            lowPowerModeObserver = nil
+        }
+    }
+    
+    deinit {
+        // 注意：由于是单例，deinit通常不会被调用，但为了代码完整性保留
+        Task { @MainActor [weak self] in
+            self?.removeLifecycleObservers()
+        }
+    }
+    
+    /// 处理热状态变化 - 设备过热时降低帧率
+    private func handleThermalStateChange() {
+        let thermalState = ProcessInfo.processInfo.thermalState
+        print("[PiPManager] Thermal state changed: \(thermalState.rawValue)")
+        
+        guard isPiPActive, let provider = currentProvider else { return }
+        
+        let baseFrameRate = provider.preferredFrameRate
+        let adjustedFrameRate: Int
+        
+        switch thermalState {
+        case .nominal:
+            adjustedFrameRate = baseFrameRate
+        case .fair:
+            // 轻微发热，降低20%帧率
+            adjustedFrameRate = max(1, Int(Double(baseFrameRate) * 0.8))
+        case .serious:
+            // 严重发热，降低50%帧率
+            adjustedFrameRate = max(1, baseFrameRate / 2)
+        case .critical:
+            // 临界状态，最低帧率
+            adjustedFrameRate = max(1, baseFrameRate / 4)
+        @unknown default:
+            adjustedFrameRate = baseFrameRate
+        }
+        
+        if adjustedFrameRate != currentFrameRate {
+            print("[PiPManager] Adjusting frame rate from \(currentFrameRate) to \(adjustedFrameRate) due to thermal state")
+            setFrameRate(adjustedFrameRate)
+        }
+    }
+    
+    /// 处理电源状态变化 - 低电量模式时降低帧率
+    private func handlePowerStateChange() {
+        let isLowPowerMode = ProcessInfo.processInfo.isLowPowerModeEnabled
+        print("[PiPManager] Low power mode: \(isLowPowerMode)")
+        
+        guard isPiPActive, let provider = currentProvider else { return }
+        
+        let baseFrameRate = provider.preferredFrameRate
+        let adjustedFrameRate: Int
+        
+        if isLowPowerMode {
+            // 低电量模式，降低50%帧率
+            adjustedFrameRate = max(1, baseFrameRate / 2)
+        } else {
+            // 检查热状态，可能需要保持较低帧率
+            let thermalState = ProcessInfo.processInfo.thermalState
+            if thermalState == .nominal {
+                adjustedFrameRate = baseFrameRate
+            } else {
+                // 保持当前帧率，让热状态处理函数决定
+                return
+            }
+        }
+        
+        if adjustedFrameRate != currentFrameRate {
+            print("[PiPManager] Adjusting frame rate from \(currentFrameRate) to \(adjustedFrameRate) due to power state")
+            setFrameRate(adjustedFrameRate)
+        }
     }
     
     @objc private func handleAppDidEnterBackground() {
@@ -183,12 +293,15 @@ final class PiPManager: NSObject, ObservableObject {
         let converter = ViewToVideoStreamConverter()
         videoStreamConverter = converter
 
-        converter.onScreenOff = {
+        // 使用 [weak self] 避免循环引用
+        converter.onScreenOff = { [weak self] in
+            guard self != nil else { return }
             Task { @MainActor in
                 DisplayTimeTracker.shared.handleScreenOff()
             }
         }
-        converter.onScreenOn = {
+        converter.onScreenOn = { [weak self] in
+            guard self != nil else { return }
             Task { @MainActor in
                 DisplayTimeTracker.shared.handleScreenOn()
             }

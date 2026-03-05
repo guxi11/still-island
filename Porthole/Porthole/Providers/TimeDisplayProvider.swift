@@ -117,10 +117,7 @@ final class TimeDisplayProvider: PiPContentProvider {
         
         let timeString = dateFormatter.string(from: Date())
         timeLabel.text = timeString
-        
-        // Force redraw
-        contentView.setNeedsDisplay()
-        timeLabel.setNeedsDisplay()
+        // UILabel会在text改变时自动重绘，无需手动调用setNeedsDisplay
     }
     
     // MARK: - Celebration

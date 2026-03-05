@@ -35,6 +35,33 @@ final class DisplayTimeTracker: ObservableObject {
     private var modelContext: ModelContext?
     private var notificationObservers: [NSObjectProtocol] = []
     
+    // MARK: - Query Cache
+    
+    /// 查询缓存，避免频繁数据库访问
+    private struct CacheKey: Hashable {
+        let startDate: Date
+        let endDate: Date
+    }
+    
+    private var sessionsCache: [CacheKey: (sessions: [DisplaySession], timestamp: Date)] = [:]
+    private var dailyTotalsCache: [CacheKey: (data: [(date: Date, duration: TimeInterval, awayDuration: TimeInterval, byProvider: [String: TimeInterval])], timestamp: Date)] = [:]
+    
+    /// 缓存有效期（10秒）
+    private let cacheValidityDuration: TimeInterval = 10.0
+    
+    /// 清理过期缓存
+    private func cleanExpiredCache() {
+        let now = Date()
+        sessionsCache = sessionsCache.filter { now.timeIntervalSince($0.value.timestamp) < cacheValidityDuration }
+        dailyTotalsCache = dailyTotalsCache.filter { now.timeIntervalSince($0.value.timestamp) < cacheValidityDuration }
+    }
+    
+    /// 使缓存失效（当数据变化时调用）
+    private func invalidateCache() {
+        sessionsCache.removeAll()
+        dailyTotalsCache.removeAll()
+    }
+    
     // MARK: - Initialization
     
     private init() {
@@ -157,9 +184,21 @@ final class DisplayTimeTracker: ObservableObject {
         isTracking = false
     }
     
-    /// Get all sessions for a specific date
+    /// Get all sessions for a specific date (带缓存)
     func sessions(for date: Date) -> [DisplaySession] {
         guard let context = modelContext else { return [] }
+        
+        let calendar = Calendar.current
+        let startOfDay = calendar.startOfDay(for: date)
+        let endOfDay = calendar.date(byAdding: .day, value: 1, to: startOfDay)!
+        
+        let cacheKey = CacheKey(startDate: startOfDay, endDate: endOfDay)
+        
+        // 检查缓存
+        if let cached = sessionsCache[cacheKey],
+           Date().timeIntervalSince(cached.timestamp) < cacheValidityDuration {
+            return cached.sessions
+        }
         
         let predicate = DisplaySession.predicate(for: date)
         let descriptor = FetchDescriptor<DisplaySession>(
@@ -168,16 +207,27 @@ final class DisplayTimeTracker: ObservableObject {
         )
         
         do {
-            return try context.fetch(descriptor)
+            let results = try context.fetch(descriptor)
+            sessionsCache[cacheKey] = (sessions: results, timestamp: Date())
+            cleanExpiredCache()
+            return results
         } catch {
             print("[DisplayTimeTracker] ERROR: Failed to fetch sessions: \(error)")
             return []
         }
     }
     
-    /// Get all sessions in a date range
+    /// Get all sessions in a date range (带缓存)
     func sessions(from startDate: Date, to endDate: Date) -> [DisplaySession] {
         guard let context = modelContext else { return [] }
+        
+        let cacheKey = CacheKey(startDate: startDate, endDate: endDate)
+        
+        // 检查缓存
+        if let cached = sessionsCache[cacheKey],
+           Date().timeIntervalSince(cached.timestamp) < cacheValidityDuration {
+            return cached.sessions
+        }
         
         let predicate = DisplaySession.predicate(from: startDate, to: endDate)
         let descriptor = FetchDescriptor<DisplaySession>(
@@ -186,7 +236,10 @@ final class DisplayTimeTracker: ObservableObject {
         )
         
         do {
-            return try context.fetch(descriptor)
+            let results = try context.fetch(descriptor)
+            sessionsCache[cacheKey] = (sessions: results, timestamp: Date())
+            cleanExpiredCache()
+            return results
         } catch {
             print("[DisplayTimeTracker] ERROR: Failed to fetch sessions: \(error)")
             return []
@@ -217,8 +270,16 @@ final class DisplayTimeTracker: ObservableObject {
         return sessions.reduce(0) { $0 + $1.totalAwayDuration }
     }
     
-    /// Get daily totals for a date range (for charts)
+    /// Get daily totals for a date range (for charts) - 带缓存
     func dailyTotals(from startDate: Date, to endDate: Date) -> [(date: Date, duration: TimeInterval, awayDuration: TimeInterval, byProvider: [String: TimeInterval])] {
+        let cacheKey = CacheKey(startDate: startDate, endDate: endDate)
+        
+        // 检查缓存
+        if let cached = dailyTotalsCache[cacheKey],
+           Date().timeIntervalSince(cached.timestamp) < cacheValidityDuration {
+            return cached.data
+        }
+        
         let calendar = Calendar.current
         var results: [(date: Date, duration: TimeInterval, awayDuration: TimeInterval, byProvider: [String: TimeInterval])] = []
         
@@ -240,6 +301,9 @@ final class DisplayTimeTracker: ObservableObject {
             currentDate = calendar.date(byAdding: .day, value: 1, to: currentDate)!
         }
         
+        dailyTotalsCache[cacheKey] = (data: results, timestamp: Date())
+        cleanExpiredCache()
+        
         return results
     }
     
@@ -249,6 +313,8 @@ final class DisplayTimeTracker: ObservableObject {
         guard let context = modelContext else { return }
         do {
             try context.save()
+            // 数据变化后使缓存失效
+            invalidateCache()
         } catch {
             print("[DisplayTimeTracker] ERROR: Failed to save context: \(error)")
         }
