@@ -3,15 +3,18 @@
 //  Porthole
 //
 //  Provides a digital clock view for PiP display.
+//  Optimized with TextHardwareRenderer for minimal CPU usage.
 //
 
 import UIKit
+import AVFoundation
 import Combine
 
 /// A content provider that displays a digital clock in PiP window.
 /// Shows current time in HH:mm:ss format with high contrast styling.
+/// Uses TextHardwareRenderer for efficient direct rendering to pixel buffer.
 @MainActor
-final class TimeDisplayProvider: PiPContentProvider {
+final class TimeDisplayProvider: NSObject, DirectVideoProvider {
     
     // MARK: - PiPContentProvider Static Properties
     
@@ -24,21 +27,25 @@ final class TimeDisplayProvider: PiPContentProvider {
     let contentView: UIView
     let preferredFrameRate: Int = 1
     
+    // MARK: - DirectVideoProvider
+    
+    private var outputLayer: AVSampleBufferDisplayLayer?
+    
     // MARK: - Private Properties
     
-    private let timeLabel: UILabel
-    private var timer: Timer?
+    private var renderer: TextHardwareRenderer?
     private let dateFormatter: DateFormatter
+    private let placeholderLabel: UILabel
     
     // Celebration
     private var celebrationView: CelebrationView?
     private var cancellables = Set<AnyCancellable>()
     private var isCelebrating = false
-    private var lastCelebratedIntervalId: UUID? // 防止重复触发
+    private var lastCelebratedIntervalId: UUID?
     
     // MARK: - Initialization
     
-    init() {
+    override init() {
         // Configure date formatter
         dateFormatter = DateFormatter()
         dateFormatter.dateFormat = "HH:mm:ss"
@@ -46,10 +53,9 @@ final class TimeDisplayProvider: PiPContentProvider {
         // Create container view with fixed size
         let containerSize = CGSize(width: 200, height: 100)
         let container = UIView(frame: CGRect(origin: .zero, size: containerSize))
-        // OLED省电：使用纯黑背景，OLED屏幕黑色像素不发光
         container.backgroundColor = UIColor.black
         
-        // Create time label with Auto Layout for proper centering
+        // Create placeholder label (shown during loading)
         let label = UILabel()
         label.font = UIFont.monospacedDigitSystemFont(ofSize: 36, weight: .semibold)
         label.textColor = .white
@@ -60,7 +66,6 @@ final class TimeDisplayProvider: PiPContentProvider {
         
         container.addSubview(label)
         
-        // Setup constraints for centering
         NSLayoutConstraint.activate([
             label.centerXAnchor.constraint(equalTo: container.centerXAnchor),
             label.centerYAnchor.constraint(equalTo: container.centerYAnchor),
@@ -69,13 +74,18 @@ final class TimeDisplayProvider: PiPContentProvider {
         ])
         
         self.contentView = container
-        self.timeLabel = label
+        self.placeholderLabel = label
         
-        // Force layout
-        container.setNeedsLayout()
-        container.layoutIfNeeded()
+        super.init()
         
-        print("[TimeDisplayProvider] Initialized with view size: \(container.bounds.size), label: \(label.text ?? "nil")")
+        print("[TimeDisplayProvider] Initialized with DirectVideoProvider support")
+    }
+    
+    // MARK: - DirectVideoProvider Methods
+    
+    func setOutputLayer(_ layer: AVSampleBufferDisplayLayer) {
+        print("[TimeDisplayProvider] setOutputLayer called")
+        self.outputLayer = layer
     }
     
     // MARK: - PiPContentProvider Methods
@@ -83,19 +93,32 @@ final class TimeDisplayProvider: PiPContentProvider {
     func start() {
         print("[TimeDisplayProvider] start()")
         
-        // Update immediately
-        updateTime()
+        // Hide placeholder
+        placeholderLabel.isHidden = true
         
-        // Start timer for updates
-        timer?.invalidate()
-        timer = Timer.scheduledTimer(withTimeInterval: 1.0, repeats: true) { [weak self] _ in
-            self?.updateTime()
+        // Create hardware renderer
+        guard let layer = outputLayer else {
+            print("[TimeDisplayProvider] ERROR: No output layer set")
+            placeholderLabel.text = "显示层未初始化"
+            placeholderLabel.isHidden = false
+            return
         }
         
-        // Add to common run loop mode for background operation
-        if let timer = timer {
-            RunLoop.main.add(timer, forMode: .common)
+        renderer = TextHardwareRenderer(displayLayer: layer)
+        renderer?.configure(
+            font: UIFont.monospacedDigitSystemFont(ofSize: 72, weight: .semibold),
+            textColor: .white,
+            backgroundColor: .black
+        )
+        renderer?.setFrameRate(preferredFrameRate)
+        
+        // Provide text generator
+        renderer?.textProvider = { [weak self] in
+            guard let self = self, !self.isCelebrating else { return "" }
+            return self.dateFormatter.string(from: Date())
         }
+        
+        renderer?.start()
         
         // Subscribe to away interval completion for celebration
         setupCelebrationObserver()
@@ -103,21 +126,10 @@ final class TimeDisplayProvider: PiPContentProvider {
     
     func stop() {
         print("[TimeDisplayProvider] stop()")
-        timer?.invalidate()
-        timer = nil
+        renderer?.stop()
+        renderer = nil
         cancellables.removeAll()
         removeCelebration()
-    }
-    
-    // MARK: - Private Methods
-    
-    private func updateTime() {
-        // Don't update time label during celebration
-        guard !isCelebrating else { return }
-        
-        let timeString = dateFormatter.string(from: Date())
-        timeLabel.text = timeString
-        // UILabel会在text改变时自动重绘，无需手动调用setNeedsDisplay
     }
     
     // MARK: - Celebration
@@ -125,16 +137,13 @@ final class TimeDisplayProvider: PiPContentProvider {
     private func setupCelebrationObserver() {
         print("[TimeDisplayProvider] Setting up celebration observer")
         
-        // 先清除旧订阅，防止重复
         cancellables.removeAll()
         
-        // Subscribe to away interval completion
         DisplayTimeTracker.shared.$lastCompletedAwayInterval
             .compactMap { $0 }
             .receive(on: DispatchQueue.main)
             .sink { [weak self] interval in
                 guard let self = self else { return }
-                // 防止对同一个 interval 重复触发庆祝
                 guard self.lastCelebratedIntervalId != interval.id else { return }
                 self.lastCelebratedIntervalId = interval.id
                 print("[TimeDisplayProvider] Received away interval: \(interval.duration) seconds")
@@ -152,10 +161,7 @@ final class TimeDisplayProvider: PiPContentProvider {
         print("[TimeDisplayProvider] Showing celebration for \(Int(duration)) seconds away")
         
         // Increase frame rate for smooth animation
-        PiPManager.shared.setFrameRate(30)
-        
-        // Hide time label
-        timeLabel.isHidden = true
+        renderer?.setFrameRate(30)
         
         // Create and show celebration view
         let celebration = CelebrationView(frame: contentView.bounds)
@@ -167,11 +173,9 @@ final class TimeDisplayProvider: PiPContentProvider {
         contentView.addSubview(celebration)
         celebrationView = celebration
         
-        // Force layout update
         contentView.setNeedsLayout()
         contentView.layoutIfNeeded()
         
-        // Start the celebration animation
         celebration.startCelebration()
         
         print("[TimeDisplayProvider] Celebration view added, frame: \(celebration.frame)")
@@ -182,11 +186,8 @@ final class TimeDisplayProvider: PiPContentProvider {
         celebrationView = nil
         isCelebrating = false
         
-        // Show time label again
-        timeLabel.isHidden = false
-        
         // Restore normal frame rate
-        PiPManager.shared.setFrameRate(preferredFrameRate)
+        renderer?.setFrameRate(preferredFrameRate)
         DisplayTimeTracker.shared.clearLastAwayInterval()
         
         print("[TimeDisplayProvider] Celebration ended")

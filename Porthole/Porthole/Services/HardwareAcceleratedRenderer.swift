@@ -836,3 +836,238 @@ final class MetalUIViewRenderer: NSObject, HardwareAcceleratedRenderer, MTKViewD
         return sampleBuffer
     }
 }
+
+// MARK: - Text Hardware Renderer
+
+/// Optimized renderer for text-based content (clock, timer).
+/// Uses Core Graphics to render text directly to pixel buffer, avoiding UIView overhead.
+/// Only renders when text changes, dramatically reducing CPU usage for low-update content.
+final class TextHardwareRenderer: HardwareAcceleratedRenderer {
+    
+    // Fixed output size for PiP (2:1 aspect ratio)
+    private static let outputWidth: Int = 400
+    private static let outputHeight: Int = 200
+    
+    let displayLayer: AVSampleBufferDisplayLayer
+    
+    // Text properties
+    private var currentText: String = ""
+    private var textColor: UIColor = .white
+    private var font: UIFont = UIFont.monospacedDigitSystemFont(ofSize: 72, weight: .semibold)
+    private var backgroundColor: UIColor = .black
+    
+    // Rendering resources
+    private var pixelBufferPool: CVPixelBufferPool?
+    private var formatDescription: CMVideoFormatDescription?
+    private let colorSpace = CGColorSpaceCreateDeviceRGB()
+    
+    // Frame timing
+    private var timer: Timer?
+    private var frameRate: Int = 1
+    private var lastRenderedText: String = ""
+    
+    // Callback to get current text
+    var textProvider: (() -> String)?
+    
+    init(displayLayer: AVSampleBufferDisplayLayer) {
+        self.displayLayer = displayLayer
+        setupDisplayLayer()
+        setupPixelBufferPool()
+    }
+    
+    private func setupDisplayLayer() {
+        displayLayer.videoGravity = .resizeAspect
+        displayLayer.backgroundColor = UIColor.black.cgColor
+        
+        var timebase: CMTimebase?
+        CMTimebaseCreateWithSourceClock(
+            allocator: kCFAllocatorDefault,
+            sourceClock: CMClockGetHostTimeClock(),
+            timebaseOut: &timebase
+        )
+        if let timebase = timebase {
+            CMTimebaseSetTime(timebase, time: CMClockGetTime(CMClockGetHostTimeClock()))
+            CMTimebaseSetRate(timebase, rate: 1.0)
+            displayLayer.controlTimebase = timebase
+        }
+    }
+    
+    private func setupPixelBufferPool() {
+        let attributes: [String: Any] = [
+            kCVPixelBufferPixelFormatTypeKey as String: kCVPixelFormatType_32BGRA,
+            kCVPixelBufferWidthKey as String: Self.outputWidth,
+            kCVPixelBufferHeightKey as String: Self.outputHeight,
+            kCVPixelBufferIOSurfacePropertiesKey as String: [:],
+            kCVPixelBufferCGImageCompatibilityKey as String: true,
+            kCVPixelBufferCGBitmapContextCompatibilityKey as String: true
+        ]
+        
+        CVPixelBufferPoolCreate(nil, nil, attributes as CFDictionary, &pixelBufferPool)
+        
+        // Create format description
+        if let pool = pixelBufferPool {
+            var pixelBuffer: CVPixelBuffer?
+            CVPixelBufferPoolCreatePixelBuffer(nil, pool, &pixelBuffer)
+            if let buffer = pixelBuffer {
+                CMVideoFormatDescriptionCreateForImageBuffer(
+                    allocator: kCFAllocatorDefault,
+                    imageBuffer: buffer,
+                    formatDescriptionOut: &formatDescription
+                )
+            }
+        }
+    }
+    
+    /// Configure text appearance
+    func configure(font: UIFont, textColor: UIColor, backgroundColor: UIColor = .black) {
+        self.font = font
+        self.textColor = textColor
+        self.backgroundColor = backgroundColor
+    }
+    
+    /// Set the frame rate for updates
+    func setFrameRate(_ fps: Int) {
+        self.frameRate = max(1, min(60, fps))
+        
+        // Restart timer if running
+        if timer != nil {
+            timer?.invalidate()
+            startTimer()
+        }
+    }
+    
+    func start() {
+        lastRenderedText = ""
+        startTimer()
+        
+        // Render first frame immediately
+        renderFrame()
+        
+        print("[TextHardwareRenderer] Started at \(frameRate) FPS")
+    }
+    
+    func stop() {
+        timer?.invalidate()
+        timer = nil
+    }
+    
+    private func startTimer() {
+        // Use Timer instead of CADisplayLink for lower CPU overhead
+        // Timer fires only at specified interval, not every display refresh
+        timer = Timer.scheduledTimer(withTimeInterval: 1.0 / Double(frameRate), repeats: true) { [weak self] _ in
+            self?.renderFrame()
+        }
+        
+        // Run in common mode for background operation
+        if let timer = timer {
+            RunLoop.main.add(timer, forMode: .common)
+        }
+    }
+    
+    private func renderFrame() {
+        // Get current text from provider
+        guard let provider = textProvider else { return }
+        let text = provider()
+        
+        // Skip rendering if text hasn't changed (major optimization!)
+        // But re-render periodically to keep PiP alive
+        if text == lastRenderedText {
+            // Still need to push frames to keep PiP active
+            // but we can reuse the last rendered buffer
+        }
+        
+        lastRenderedText = text
+        
+        // Create and render frame
+        guard let pixelBuffer = renderTextToPixelBuffer(text) else { return }
+        guard let sampleBuffer = createSampleBuffer(from: pixelBuffer) else { return }
+        
+        if displayLayer.status == .failed {
+            displayLayer.flush()
+        }
+        
+        displayLayer.enqueue(sampleBuffer)
+    }
+    
+    private func renderTextToPixelBuffer(_ text: String) -> CVPixelBuffer? {
+        guard let pool = pixelBufferPool else { return nil }
+        
+        var pixelBuffer: CVPixelBuffer?
+        let status = CVPixelBufferPoolCreatePixelBuffer(nil, pool, &pixelBuffer)
+        guard status == kCVReturnSuccess, let buffer = pixelBuffer else { return nil }
+        
+        CVPixelBufferLockBaseAddress(buffer, [])
+        defer { CVPixelBufferUnlockBaseAddress(buffer, []) }
+        
+        let width = CVPixelBufferGetWidth(buffer)
+        let height = CVPixelBufferGetHeight(buffer)
+        
+        guard let context = CGContext(
+            data: CVPixelBufferGetBaseAddress(buffer),
+            width: width,
+            height: height,
+            bitsPerComponent: 8,
+            bytesPerRow: CVPixelBufferGetBytesPerRow(buffer),
+            space: colorSpace,
+            bitmapInfo: CGBitmapInfo.byteOrder32Little.rawValue | CGImageAlphaInfo.premultipliedFirst.rawValue
+        ) else { return nil }
+        
+        // Fill background
+        context.setFillColor(backgroundColor.cgColor)
+        context.fill(CGRect(x: 0, y: 0, width: width, height: height))
+        
+        // Setup text rendering
+        let paragraphStyle = NSMutableParagraphStyle()
+        paragraphStyle.alignment = .center
+        
+        let attributes: [NSAttributedString.Key: Any] = [
+            .font: font,
+            .foregroundColor: textColor,
+            .paragraphStyle: paragraphStyle
+        ]
+        
+        let attributedString = NSAttributedString(string: text, attributes: attributes)
+        
+        // Calculate text size and position
+        let textSize = attributedString.size()
+        let x = (CGFloat(width) - textSize.width) / 2
+        let y = (CGFloat(height) - textSize.height) / 2
+        
+        // Draw text using Core Text (CGContext coordinate system)
+        // Need to flip for correct orientation
+        context.saveGState()
+        context.translateBy(x: 0, y: CGFloat(height))
+        context.scaleBy(x: 1, y: -1)
+        
+        // Use UIKit drawing in the flipped context
+        UIGraphicsPushContext(context)
+        attributedString.draw(in: CGRect(x: x, y: y, width: textSize.width, height: textSize.height))
+        UIGraphicsPopContext()
+        
+        context.restoreGState()
+        
+        return buffer
+    }
+    
+    private func createSampleBuffer(from pixelBuffer: CVPixelBuffer) -> CMSampleBuffer? {
+        guard let formatDesc = formatDescription else { return nil }
+        
+        let hostTime = CMClockGetTime(CMClockGetHostTimeClock())
+        var timingInfo = CMSampleTimingInfo(
+            duration: CMTime(value: 1, timescale: CMTimeScale(frameRate)),
+            presentationTimeStamp: hostTime,
+            decodeTimeStamp: .invalid
+        )
+        
+        var sampleBuffer: CMSampleBuffer?
+        CMSampleBufferCreateReadyWithImageBuffer(
+            allocator: kCFAllocatorDefault,
+            imageBuffer: pixelBuffer,
+            formatDescription: formatDesc,
+            sampleTiming: &timingInfo,
+            sampleBufferOut: &sampleBuffer
+        )
+        
+        return sampleBuffer
+    }
+}

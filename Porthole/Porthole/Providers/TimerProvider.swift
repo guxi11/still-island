@@ -3,15 +3,18 @@
 //  Porthole
 //
 //  Provides a timer view for PiP display that auto-starts on launch.
+//  Optimized with TextHardwareRenderer for minimal CPU usage.
 //
 
 import UIKit
+import AVFoundation
 import Combine
 
 /// A content provider that displays an elapsed time timer in PiP window.
 /// Timer automatically starts when PiP is launched and can be paused/resumed.
+/// Uses TextHardwareRenderer for efficient direct rendering to pixel buffer.
 @MainActor
-final class TimerProvider: PiPContentProvider {
+final class TimerProvider: NSObject, DirectVideoProvider {
     
     // MARK: - PiPContentProvider Static Properties
     
@@ -24,32 +27,36 @@ final class TimerProvider: PiPContentProvider {
     let contentView: UIView
     let preferredFrameRate: Int = 1
     
+    // MARK: - DirectVideoProvider
+    
+    private var outputLayer: AVSampleBufferDisplayLayer?
+    
     // MARK: - Private Properties
 
-    private let timerLabel: UILabel
-    private var timer: Timer?
+    private var renderer: TextHardwareRenderer?
+    private let placeholderLabel: UILabel
     private var elapsedSeconds: TimeInterval = 0
     private var isPaused = false
+    private var countingTimer: Timer?
     
     // Celebration
     private var celebrationView: CelebrationView?
     private var cancellables = Set<AnyCancellable>()
     private var isCelebrating = false
-    private var lastCelebratedIntervalId: UUID? // 防止重复触发
+    private var lastCelebratedIntervalId: UUID?
     
     // MARK: - Initialization
     
-    init() {
+    override init() {
         // Create container view with fixed size
         let containerSize = CGSize(width: 200, height: 100)
         let container = UIView(frame: CGRect(origin: .zero, size: containerSize))
-        // OLED省电：使用纯黑背景，OLED屏幕黑色像素不发光
         container.backgroundColor = UIColor.black
 
-        // Create timer label with Auto Layout for proper centering
+        // Create placeholder label
         let label = UILabel()
         label.font = UIFont.monospacedDigitSystemFont(ofSize: 36, weight: .semibold)
-        label.textColor = UIColor(red: 0.4, green: 1.0, blue: 0.4, alpha: 1.0) // Green color for timer
+        label.textColor = UIColor(red: 0.4, green: 1.0, blue: 0.4, alpha: 1.0)
         label.textAlignment = .center
         label.text = "00:00:00"
         label.backgroundColor = .clear
@@ -57,9 +64,7 @@ final class TimerProvider: PiPContentProvider {
 
         container.addSubview(label)
 
-        // Setup constraints for centering
         NSLayoutConstraint.activate([
-            // Timer label: centered both horizontally and vertically
             label.centerXAnchor.constraint(equalTo: container.centerXAnchor),
             label.centerYAnchor.constraint(equalTo: container.centerYAnchor),
             label.leadingAnchor.constraint(greaterThanOrEqualTo: container.leadingAnchor, constant: 8),
@@ -67,13 +72,18 @@ final class TimerProvider: PiPContentProvider {
         ])
 
         self.contentView = container
-        self.timerLabel = label
+        self.placeholderLabel = label
 
-        // Force layout
-        container.setNeedsLayout()
-        container.layoutIfNeeded()
+        super.init()
 
-        print("[TimerProvider] Initialized with view size: \(container.bounds.size)")
+        print("[TimerProvider] Initialized with DirectVideoProvider support")
+    }
+    
+    // MARK: - DirectVideoProvider Methods
+    
+    func setOutputLayer(_ layer: AVSampleBufferDisplayLayer) {
+        print("[TimerProvider] setOutputLayer called")
+        self.outputLayer = layer
     }
     
     // MARK: - PiPContentProvider Methods
@@ -81,28 +91,41 @@ final class TimerProvider: PiPContentProvider {
     func start() {
         print("[TimerProvider] start() - isPaused: \(isPaused)")
 
-        // If resuming from pause, just continue
         // If fresh start, reset elapsed time
         if !isPaused {
             elapsedSeconds = 0
         }
         isPaused = false
-
-        // Update display immediately
-        updateDisplay()
-
-        // Start timer
-        timer?.invalidate()
-        timer = Timer.scheduledTimer(withTimeInterval: 1.0, repeats: true) { [weak self] _ in
-            guard let self = self, !self.isPaused else { return }
-            self.elapsedSeconds += 1
-            self.updateDisplay()
+        
+        // Hide placeholder
+        placeholderLabel.isHidden = true
+        
+        // Create hardware renderer
+        guard let layer = outputLayer else {
+            print("[TimerProvider] ERROR: No output layer set")
+            placeholderLabel.text = "显示层未初始化"
+            placeholderLabel.isHidden = false
+            return
         }
-
-        // Add to common run loop mode for background operation
-        if let timer = timer {
-            RunLoop.main.add(timer, forMode: .common)
+        
+        renderer = TextHardwareRenderer(displayLayer: layer)
+        renderer?.configure(
+            font: UIFont.monospacedDigitSystemFont(ofSize: 72, weight: .semibold),
+            textColor: UIColor(red: 0.4, green: 1.0, blue: 0.4, alpha: 1.0),
+            backgroundColor: .black
+        )
+        renderer?.setFrameRate(preferredFrameRate)
+        
+        // Provide text generator
+        renderer?.textProvider = { [weak self] in
+            guard let self = self, !self.isCelebrating else { return "" }
+            return self.formatTime(self.elapsedSeconds)
         }
+        
+        renderer?.start()
+        
+        // Start counting timer (separate from rendering)
+        startCountingTimer()
 
         // Subscribe to away interval completion for celebration
         setupCelebrationObserver()
@@ -111,8 +134,10 @@ final class TimerProvider: PiPContentProvider {
     func stop() {
         print("[TimerProvider] stop()")
         isPaused = true
-        timer?.invalidate()
-        timer = nil
+        countingTimer?.invalidate()
+        countingTimer = nil
+        renderer?.stop()
+        renderer = nil
         cancellables.removeAll()
         removeCelebration()
     }
@@ -122,7 +147,6 @@ final class TimerProvider: PiPContentProvider {
     /// Resets the timer to zero
     func reset() {
         elapsedSeconds = 0
-        updateDisplay()
     }
     
     /// Returns current elapsed time
@@ -132,17 +156,24 @@ final class TimerProvider: PiPContentProvider {
     
     // MARK: - Private Methods
     
-    private func updateDisplay() {
-        // Don't update timer label during celebration
-        guard !isCelebrating else { return }
+    private func startCountingTimer() {
+        countingTimer?.invalidate()
+        countingTimer = Timer.scheduledTimer(withTimeInterval: 1.0, repeats: true) { [weak self] _ in
+            guard let self = self, !self.isPaused, !self.isCelebrating else { return }
+            self.elapsedSeconds += 1
+        }
         
-        let totalSeconds = Int(elapsedSeconds)
+        if let timer = countingTimer {
+            RunLoop.main.add(timer, forMode: .common)
+        }
+    }
+    
+    private func formatTime(_ seconds: TimeInterval) -> String {
+        let totalSeconds = Int(seconds)
         let hours = totalSeconds / 3600
         let minutes = (totalSeconds % 3600) / 60
-        let seconds = totalSeconds % 60
-        
-        timerLabel.text = String(format: "%02d:%02d:%02d", hours, minutes, seconds)
-        // UILabel会在text改变时自动重绘，无需手动调用setNeedsDisplay
+        let secs = totalSeconds % 60
+        return String(format: "%02d:%02d:%02d", hours, minutes, secs)
     }
 
     // MARK: - Celebration
@@ -150,16 +181,13 @@ final class TimerProvider: PiPContentProvider {
     private func setupCelebrationObserver() {
         print("[TimerProvider] Setting up celebration observer")
         
-        // 先清除旧订阅，防止重复
         cancellables.removeAll()
         
-        // Subscribe to away interval completion
         DisplayTimeTracker.shared.$lastCompletedAwayInterval
             .compactMap { $0 }
             .receive(on: DispatchQueue.main)
             .sink { [weak self] interval in
                 guard let self = self else { return }
-                // 防止对同一个 interval 重复触发庆祝
                 guard self.lastCelebratedIntervalId != interval.id else { return }
                 self.lastCelebratedIntervalId = interval.id
                 print("[TimerProvider] Received away interval: \(interval.duration) seconds")
@@ -177,10 +205,7 @@ final class TimerProvider: PiPContentProvider {
         print("[TimerProvider] Showing celebration for \(Int(duration)) seconds away")
         
         // Increase frame rate for smooth animation
-        PiPManager.shared.setFrameRate(30)
-
-        // Hide timer label
-        timerLabel.isHidden = true
+        renderer?.setFrameRate(30)
 
         // Create and show celebration view
         let celebration = CelebrationView(frame: contentView.bounds)
@@ -192,11 +217,9 @@ final class TimerProvider: PiPContentProvider {
         contentView.addSubview(celebration)
         celebrationView = celebration
         
-        // Force layout update
         contentView.setNeedsLayout()
         contentView.layoutIfNeeded()
         
-        // Start the celebration animation
         celebration.startCelebration()
         
         print("[TimerProvider] Celebration view added, frame: \(celebration.frame)")
@@ -207,11 +230,8 @@ final class TimerProvider: PiPContentProvider {
         celebrationView = nil
         isCelebrating = false
 
-        // Show timer label again
-        timerLabel.isHidden = false
-
         // Restore normal frame rate
-        PiPManager.shared.setFrameRate(preferredFrameRate)
+        renderer?.setFrameRate(preferredFrameRate)
         DisplayTimeTracker.shared.clearLastAwayInterval()
 
         print("[TimerProvider] Celebration ended")
