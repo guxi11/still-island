@@ -158,6 +158,9 @@ final class ViewToVideoStreamConverter {
             }
         }
         
+        // 立即推送第一帧，避免 PiP 启动时显示空白或动画
+        captureAndPushFrame()
+        
         displayLink = CADisplayLink(target: self, selector: #selector(displayLinkFired))
         // 使用系统级帧率控制，减少CPU唤醒次数
         if #available(iOS 15.0, *) {

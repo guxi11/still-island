@@ -5,8 +5,16 @@
 	<key>UIBackgroundModes</key>
 	<array>
 		<string>audio</string>
+		<string>voip</string>
 	</array>
 	<key>ITSAppUsesNonExemptEncryption</key>
 	<false/>
+	<key>NSBonjourServices</key>
+	<array>
+		<string>_porthole-share._tcp</string>
+		<string>_porthole-share._udp</string>
+	</array>
+	<key>NSLocalNetworkUsageDescription</key>
+	<string>Porthole 需要访问本地网络来发现和连接附近的设备，实现实景共享功能。您可以与家人朋友共享摄像头画面。</string>
 </dict>
 </plist>

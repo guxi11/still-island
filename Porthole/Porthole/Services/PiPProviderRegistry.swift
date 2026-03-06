@@ -13,6 +13,7 @@ enum PiPProviderType: String, CaseIterable, Identifiable {
     case time = "time"
     case timer = "timer"
     case camera = "camera"
+    case sharedCamera = "sharedCamera"  // 实景共享 - 支持 VoIP 后台模式
     case cat = "cat"
     case video = "video"
 
@@ -23,6 +24,7 @@ enum PiPProviderType: String, CaseIterable, Identifiable {
         case .time: return TimeDisplayProvider.displayName
         case .timer: return TimerProvider.displayName
         case .camera: return CameraProvider.displayName
+        case .sharedCamera: return SharedCameraProvider.displayName
         case .cat: return CatCompanionProvider.displayName
         case .video: return VideoLoopProvider.displayName
         }
@@ -33,6 +35,7 @@ enum PiPProviderType: String, CaseIterable, Identifiable {
         case .time: return TimeDisplayProvider.iconName
         case .timer: return TimerProvider.iconName
         case .camera: return CameraProvider.iconName
+        case .sharedCamera: return SharedCameraProvider.iconName
         case .cat: return CatCompanionProvider.iconName
         case .video: return VideoLoopProvider.iconName
         }
@@ -51,12 +54,20 @@ enum PiPProviderType: String, CaseIterable, Identifiable {
         default: return false
         }
     }
+    
+    /// Whether this provider type requires room setup before use
+    var requiresRoomSetup: Bool {
+        switch self {
+        case .sharedCamera: return true
+        default: return false
+        }
+    }
 
     /// Whether multiple instances of this provider type are allowed on the home page
     var allowsMultipleInstances: Bool {
         switch self {
         case .video: return true
-        case .time, .timer, .camera, .cat: return false
+        case .time, .timer, .camera, .sharedCamera, .cat: return false
         }
     }
 
@@ -69,6 +80,8 @@ enum PiPProviderType: String, CaseIterable, Identifiable {
             return TimerProvider()
         case .camera:
             return CameraProvider()
+        case .sharedCamera:
+            return SharedCameraProvider()
         case .cat:
             return CatCompanionProvider()
         case .video:
@@ -85,6 +98,8 @@ enum PiPProviderType: String, CaseIterable, Identifiable {
             return TimerProvider()
         case .camera:
             return CameraProvider()
+        case .sharedCamera:
+            return SharedCameraProvider()
         case .cat:
             return CatCompanionProvider()
         case .video:

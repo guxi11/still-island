@@ -46,6 +46,8 @@ struct HomeView: View {
     @State private var editingCardId: UUID?
     @State private var showStatistics = false
     @State private var showPrivacyPolicy = false
+    @State private var showSharedCameraSetup = false
+    @State private var pendingSharedCameraProvider: SharedCameraProvider?
     
     // Warm cream/milk white background
     private let backgroundColor = Color(red: 250/255, green: 247/255, blue: 240/255)
@@ -313,6 +315,19 @@ struct HomeView: View {
             }
             .presentationDetents([.fraction(0.8)])
             .presentationDragIndicator(.visible)
+        }
+        .sheet(isPresented: $showSharedCameraSetup) {
+            if let provider = pendingSharedCameraProvider {
+                SharedCameraSetupView(
+                    provider: provider,
+                    onStartPiP: {
+                        // 房间设置完成，启动 PiP
+                        startPiPWithSharedCamera(provider: provider)
+                    }
+                )
+                .presentationDetents([.fraction(0.85)])
+                .presentationDragIndicator(.visible)
+            }
         }
     }
     
@@ -789,6 +804,16 @@ struct HomeView: View {
             }
         }
         
+        // For sharedCamera provider, show room setup first
+        if providerType.requiresRoomSetup {
+            let provider = providerType.createProvider(with: card.configurationData)
+            if let sharedProvider = provider as? SharedCameraProvider {
+                pendingSharedCameraProvider = sharedProvider
+                showSharedCameraSetup = true
+            }
+            return
+        }
+        
         print("[HomeView] Starting PiP for card: \(card.id)")
         
         pipViewId = UUID()
@@ -820,6 +845,11 @@ struct HomeView: View {
             }
         }
         
+        // For sharedCamera provider, don't prepare early - need room setup first
+        if providerType.requiresRoomSetup {
+            return
+        }
+        
         print("[HomeView] Early preparing PiP for card: \(card.id)")
         
         pipViewId = UUID()
@@ -830,6 +860,23 @@ struct HomeView: View {
         
         // 提前准备 PiP
         pipManager.preparePiP(provider: provider)
+    }
+    
+    /// 使用共享摄像头 provider 启动 PiP（房间设置完成后调用）
+    private func startPiPWithSharedCamera(provider: SharedCameraProvider) {
+        guard let card = currentCard else { return }
+        
+        print("[HomeView] Starting PiP with SharedCameraProvider for card: \(card.id)")
+        
+        pipViewId = UUID()
+        cardManager.updateLastOpenedCard(id: card.id)
+        
+        currentProvider = provider
+        pendingSharedCameraProvider = nil
+        
+        // 启动 PiP
+        pipManager.preparePiP(provider: provider)
+        pipManager.confirmStartPiP()
     }
     
     private func stopPiP() {

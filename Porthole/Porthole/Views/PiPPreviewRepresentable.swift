@@ -92,6 +92,16 @@ struct PiPStaticPreview: View {
                         .font(.system(size: 28, weight: .medium))
                         .foregroundStyle(.white.opacity(0.8))
                 }
+            case .sharedCamera:
+                // Shared camera shows network icon
+                VStack(spacing: 4) {
+                    Image(systemName: "person.2.wave.2.fill")
+                        .font(.system(size: 24, weight: .medium))
+                        .foregroundStyle(.white.opacity(0.8))
+                    Text("共享")
+                        .font(.caption2)
+                        .foregroundStyle(.white.opacity(0.6))
+                }
             case .cat:
                 // Show GIF first frame on black background
                 GifFirstFrameView(assetName: "cat1")
@@ -120,6 +130,8 @@ struct PiPStaticPreview: View {
             return Color(red: 0.1, green: 0.15, blue: 0.1)
         case .camera:
             return Color(red: 0.15, green: 0.12, blue: 0.18)
+        case .sharedCamera:
+            return Color(red: 0.1, green: 0.15, blue: 0.2)
         case .cat:
             return .black
         case .video:
@@ -134,6 +146,8 @@ struct PiPStaticPreview: View {
         case .timer:
             return Color(red: 0.4, green: 1.0, blue: 0.4)
         case .camera:
+            return .white
+        case .sharedCamera:
             return .white
         case .cat:
             return Color(red: 0.95, green: 0.6, blue: 0.3)
@@ -151,6 +165,8 @@ struct PiPStaticPreview: View {
         case .timer:
             return "00:00"
         case .camera:
+            return ""
+        case .sharedCamera:
             return ""
         case .cat:
             return ""

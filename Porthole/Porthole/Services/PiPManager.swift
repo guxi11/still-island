@@ -2,8 +2,8 @@
 //  PiPManager.swift
 //  Porthole
 //
-//  Manages Picture-in-Picture window lifecycle using AVSampleBufferDisplayLayer.
-//  Uses AVPictureInPictureController.ContentSource for direct sample buffer display.
+//  Manages Picture-in-Picture window lifecycle using VoIP mode.
+//  Uses AVPictureInPictureVideoCallViewController for clean PiP without playback controls.
 //
 
 import UIKit
@@ -11,8 +11,44 @@ import AVKit
 import Combine
 import CoreMedia
 
+// MARK: - PiP Content View Controller
+
+/// UIViewController that hosts the PiP content using AVSampleBufferDisplayLayer
+final class PiPContentViewController: AVPictureInPictureVideoCallViewController {
+    
+    private var sampleBufferView: SampleBufferDisplayView?
+    
+    var sampleBufferDisplayLayer: AVSampleBufferDisplayLayer? {
+        sampleBufferView?.sampleBufferDisplayLayer
+    }
+    
+    /// 设置显示视图（在 PiP 启动前调用）
+    func setupDisplayView(_ view: SampleBufferDisplayView) {
+        // 移除旧的视图
+        sampleBufferView?.removeFromSuperview()
+        
+        sampleBufferView = view
+        view.translatesAutoresizingMaskIntoConstraints = false
+        self.view.addSubview(view)
+        
+        NSLayoutConstraint.activate([
+            view.topAnchor.constraint(equalTo: self.view.topAnchor),
+            view.leadingAnchor.constraint(equalTo: self.view.leadingAnchor),
+            view.trailingAnchor.constraint(equalTo: self.view.trailingAnchor),
+            view.bottomAnchor.constraint(equalTo: self.view.bottomAnchor)
+        ])
+    }
+    
+    override var preferredContentSize: CGSize {
+        get { CGSize(width: 400, height: 200) }  // 2:1 aspect ratio
+        set { }
+    }
+}
+
+// MARK: - PiPManager
+
 /// Singleton manager for Picture-in-Picture functionality.
-/// Uses AVSampleBufferDisplayLayer with ContentSource for PiP display.
+/// Uses VoIP mode (AVPictureInPictureVideoCallViewController) for clean PiP without buttons.
 @MainActor
 final class PiPManager: NSObject, ObservableObject {
 
@@ -33,25 +69,23 @@ final class PiPManager: NSObject, ObservableObject {
 
     /// The display layer for preview
     var displayLayer: AVSampleBufferDisplayLayer? {
-        if directVideoDisplayLayer != nil {
-            return directVideoDisplayLayer
-        }
-        return videoStreamConverter?.displayLayer
+        pipContentViewController?.sampleBufferDisplayLayer
     }
 
     // MARK: - Private Properties
 
     private var pipController: AVPictureInPictureController?
+    private var pipContentViewController: PiPContentViewController?
     private var videoStreamConverter: ViewToVideoStreamConverter?
     private var currentProvider: PiPContentProvider?
-
-    /// Display layer for DirectVideoProvider (camera, etc.)
-    private var directVideoDisplayLayer: AVSampleBufferDisplayLayer?
 
     /// Whether current provider uses direct video output
     private var isDirectVideoProvider: Bool = false
 
-    // Reference to the view that hosts the display layer
+    /// Source view for VoIP PiP (must remain in view hierarchy)
+    private var pipSourceView: UIView?
+    
+    // Reference to the view that hosts the display layer (for fallback mode)
     private weak var hostView: SampleBufferDisplayView?
 
     // Audio session configuration
@@ -256,176 +290,136 @@ final class PiPManager: NSObject, ObservableObject {
         currentProvider = provider
         currentProviderType = type(of: provider).providerType
 
-        // Check provider type and prepare accordingly
+        // Check if provider uses direct video output
         if let directProvider = provider as? DirectVideoProvider, directProvider.providesDirectVideoOutput {
             print("[PiPManager] Provider supports direct video output")
             isDirectVideoProvider = true
-            prepareDirectVideoProvider(directProvider)
         } else {
             print("[PiPManager] Provider uses UIView capture")
             isDirectVideoProvider = false
-            prepareViewBasedProvider(provider)
         }
+        
+        // Create VoIP PiP content view controller
+        setupVoIPPiP(provider: provider)
     }
-
-    // MARK: - Direct Video Provider Setup
-
-    private func prepareDirectVideoProvider(_ provider: DirectVideoProvider) {
-        let layer = AVSampleBufferDisplayLayer()
-        layer.videoGravity = .resizeAspect
-        layer.backgroundColor = UIColor.black.cgColor
-        directVideoDisplayLayer = layer
-
-        provider.setOutputLayer(layer)
-
-        let contentView = provider.contentView
-        if contentView.bounds.size.width == 0 || contentView.bounds.size.height == 0 {
-            contentView.frame = CGRect(x: 0, y: 0, width: 200, height: 100)
-        }
-        contentView.layoutIfNeeded()
-
-        print("[PiPManager] Direct video provider prepared, waiting for view binding...")
-    }
-
-    // MARK: - View-Based Provider Setup
-
-    private func prepareViewBasedProvider(_ provider: PiPContentProvider) {
-        let converter = ViewToVideoStreamConverter()
-        videoStreamConverter = converter
-
-        // 使用 [weak self] 避免循环引用
-        converter.onScreenOff = { [weak self] in
-            guard self != nil else { return }
-            Task { @MainActor in
-                DisplayTimeTracker.shared.handleScreenOff()
+    
+    // MARK: - VoIP PiP Setup
+    
+    private func setupVoIPPiP(provider: PiPContentProvider) {
+        // Create the content view controller
+        let contentVC = PiPContentViewController()
+        pipContentViewController = contentVC
+        
+        // 创建用于 PiP 内显示的 SampleBufferDisplayView
+        let pipDisplayView = SampleBufferDisplayView()
+        contentVC.setupDisplayView(pipDisplayView)
+        
+        // Setup provider with the display layer
+        if let directProvider = provider as? DirectVideoProvider {
+            directProvider.setOutputLayer(pipDisplayView.sampleBufferDisplayLayer)
+        } else {
+            // For view-based providers, setup converter
+            let converter = ViewToVideoStreamConverter()
+            videoStreamConverter = converter
+            
+            converter.onScreenOff = { [weak self] in
+                guard self != nil else { return }
+                Task { @MainActor in
+                    DisplayTimeTracker.shared.handleScreenOff()
+                }
             }
-        }
-        converter.onScreenOn = { [weak self] in
-            guard self != nil else { return }
-            Task { @MainActor in
-                DisplayTimeTracker.shared.handleScreenOn()
+            converter.onScreenOn = { [weak self] in
+                guard self != nil else { return }
+                Task { @MainActor in
+                    DisplayTimeTracker.shared.handleScreenOn()
+                }
             }
+            
+            let contentView = provider.contentView
+            if contentView.bounds.size.width == 0 || contentView.bounds.size.height == 0 {
+                contentView.frame = CGRect(x: 0, y: 0, width: 200, height: 100)
+            }
+            contentView.layoutIfNeeded()
+            
+            converter.setContentView(contentView)
+            converter.setDisplayLayer(pipDisplayView.sampleBufferDisplayLayer)
+            converter.startCapture(frameRate: provider.preferredFrameRate)
         }
-
-        let contentView = provider.contentView
-        if contentView.bounds.size.width == 0 || contentView.bounds.size.height == 0 {
-            contentView.frame = CGRect(x: 0, y: 0, width: 200, height: 100)
-        }
-        contentView.layoutIfNeeded()
-
-        print("[PiPManager] Content view size: \(contentView.bounds.size)")
-
-        converter.setContentView(contentView)
-
-        print("[PiPManager] View-based provider prepared, waiting for view binding...")
+        
+        // Start the provider
+        provider.start()
+        
+        print("[PiPManager] VoIP PiP content view controller prepared, waiting for view binding...")
     }
 
     /// Binds the converter to the view's display layer and starts capture.
     func bindToViewLayer(_ view: SampleBufferDisplayView) {
         print("[PiPManager] Binding to view's display layer")
         hostView = view
-
-        if isDirectVideoProvider {
-            let viewLayer = view.sampleBufferDisplayLayer
-
-            if let directLayer = directVideoDisplayLayer {
-                viewLayer.videoGravity = directLayer.videoGravity
-                viewLayer.backgroundColor = directLayer.backgroundColor
-            }
-
-            if let directProvider = currentProvider as? DirectVideoProvider {
-                directProvider.setOutputLayer(viewLayer)
-            }
-
-            currentProvider?.start()
-
-            print("[PiPManager] Direct video provider started")
-
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak self] in
-                self?.setupPiPController()
-            }
-        } else {
-            guard let converter = videoStreamConverter else {
-                print("[PiPManager] bindToViewLayer: no converter")
-                return
-            }
-
-            let viewLayer = view.sampleBufferDisplayLayer
-            converter.setDisplayLayer(viewLayer)
-
-            print("[PiPManager] View layer: \(viewLayer)")
-
-            converter.startCapture(frameRate: currentProvider?.preferredFrameRate ?? 10)
-
-            currentProvider?.start()
-
-            print("[PiPManager] Video capture started")
-
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak self] in
-                self?.setupPiPController()
-            }
+        
+        // Create source view for VoIP PiP
+        let sourceView = view
+        pipSourceView = sourceView
+        
+        // Setup VoIP PiP controller
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { [weak self] in
+            self?.setupVoIPPiPController()
         }
     }
-
-    /// Sets up the PiP controller using AVSampleBufferDisplayLayer with ContentSource
-    private func setupPiPController() {
-        guard let view = hostView else {
-            print("[PiPManager] setupPiPController: no host view")
+    
+    private func setupVoIPPiPController() {
+        guard let sourceView = pipSourceView,
+              let contentVC = pipContentViewController else {
+            print("[PiPManager] setupVoIPPiPController: missing source view or content VC")
             return
         }
-
-        guard view.window != nil else {
-            print("[PiPManager] setupPiPController: view not in window, retrying...")
+        
+        guard sourceView.window != nil else {
+            print("[PiPManager] setupVoIPPiPController: source view not in window, retrying...")
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { [weak self] in
-                self?.setupPiPController()
+                self?.setupVoIPPiPController()
             }
             return
         }
-
+        
         if pipController != nil {
             print("[PiPManager] PiP controller already exists")
             return
         }
-
-        print("[PiPManager] Creating PiP controller using AVSampleBufferDisplayLayer ContentSource")
-
-        // Get the sample buffer display layer from the host view
-        let sampleBufferLayer = view.sampleBufferDisplayLayer
-
-        // Create ContentSource with AVSampleBufferDisplayLayer (iOS 15+)
+        
+        print("[PiPManager] Creating VoIP PiP controller")
+        
+        // Create ContentSource with VoIP support (iOS 15+)
         let contentSource = AVPictureInPictureController.ContentSource(
-            sampleBufferDisplayLayer: sampleBufferLayer,
-            playbackDelegate: self
+            activeVideoCallSourceView: sourceView,
+            contentViewController: contentVC
         )
-
-        // Create PiP controller with content source
+        
+        // Create PiP controller with VoIP content source
         let controller = AVPictureInPictureController(contentSource: contentSource)
         controller.delegate = self
-
-        // 不自动从inline启动PiP
+        
+        // VoIP mode specific settings
         controller.canStartPictureInPictureAutomaticallyFromInline = false
         
-        // 隐藏快进/快退按钮
-        controller.requiresLinearPlayback = true
-
         pipController = controller
-
-        print("[PiPManager] PiP controller created, isPictureInPicturePossible: \(controller.isPictureInPicturePossible)")
-
-        // Observe isPictureInPicturePossible changes using KVO
+        
+        print("[PiPManager] VoIP PiP controller created, isPictureInPicturePossible: \(controller.isPictureInPicturePossible)")
+        
+        // Observe isPictureInPicturePossible changes
         pipPossibleObservation = controller.observe(\.isPictureInPicturePossible, options: [.new, .initial]) { [weak self] pipController, change in
             Task { @MainActor in
                 let possible = change.newValue ?? false
                 print("[PiPManager] KVO: isPictureInPicturePossible changed to: \(possible)")
                 self?.isPiPPossible = possible
-
+                
                 if possible && self?.isPreparingPiP == true && self?.isPiPActive == false {
-                    print("[PiPManager] KVO: Auto-starting PiP now!")
+                    print("[PiPManager] KVO: Auto-starting VoIP PiP now!")
                     pipController.startPictureInPicture()
                 }
             }
         }
-
+        
         // Try to start after a delay
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak self] in
             self?.tryStartPiP()
@@ -438,10 +432,10 @@ final class PiPManager: NSObject, ObservableObject {
         print("[PiPManager] tryStartPiP - isPictureInPicturePossible: \(controller.isPictureInPicturePossible)")
 
         if controller.isPictureInPicturePossible {
-            print("[PiPManager] Starting PiP...")
+            print("[PiPManager] Starting VoIP PiP...")
             controller.startPictureInPicture()
         } else {
-            print("[PiPManager] PiP not possible yet, attempting anyway...")
+            print("[PiPManager] VoIP PiP not possible yet, attempting anyway...")
             controller.startPictureInPicture()
         }
     }
@@ -468,9 +462,6 @@ final class PiPManager: NSObject, ObservableObject {
         videoStreamConverter?.stopCapture()
         videoStreamConverter = nil
 
-        // Clean up direct video layer
-        directVideoDisplayLayer = nil
-
         // Stop and release provider
         if let provider = currentProvider {
             provider.contentView.removeFromSuperview()
@@ -478,6 +469,10 @@ final class PiPManager: NSObject, ObservableObject {
         }
         currentProvider = nil
 
+        // Clean up VoIP PiP
+        pipContentViewController = nil
+        pipSourceView = nil
+        
         // Release PiP controller
         pipController = nil
         hostView = nil
@@ -507,10 +502,10 @@ final class PiPManager: NSObject, ObservableObject {
         print("[PiPManager] confirmStartPiP called")
         
         if let controller = pipController, controller.isPictureInPicturePossible {
-            print("[PiPManager] Starting PiP immediately")
+            print("[PiPManager] Starting VoIP PiP immediately")
             controller.startPictureInPicture()
         } else {
-            print("[PiPManager] Waiting for PiP to become possible...")
+            print("[PiPManager] Waiting for VoIP PiP to become possible...")
         }
     }
 
@@ -546,11 +541,11 @@ final class PiPManager: NSObject, ObservableObject {
     private func configureAudioSession() {
         do {
             let audioSession = AVAudioSession.sharedInstance()
-            // 使用playback类别，支持后台音频播放
-            try audioSession.setCategory(.playback, mode: .moviePlayback, options: [.mixWithOthers])
+            // 使用 playAndRecord 类别配合 voiceChat 模式以支持 VoIP PiP
+            try audioSession.setCategory(.playAndRecord, mode: .voiceChat, options: [.mixWithOthers, .allowBluetooth, .defaultToSpeaker])
             try audioSession.setActive(true)
             isAudioSessionConfigured = true
-            print("[PiPManager] Audio session configured successfully")
+            print("[PiPManager] Audio session configured for VoIP successfully")
         } catch {
             print("[PiPManager] ERROR: Failed to configure audio session: \(error)")
             errorMessage = "音频会话配置失败: \(error.localizedDescription)"
@@ -564,7 +559,7 @@ extension PiPManager: AVPictureInPictureControllerDelegate {
 
     nonisolated func pictureInPictureControllerWillStartPictureInPicture(_ pictureInPictureController: AVPictureInPictureController) {
         Task { @MainActor in
-            print("[PiPManager] PiP will start")
+            print("[PiPManager] VoIP PiP will start")
         }
     }
 
@@ -583,13 +578,13 @@ extension PiPManager: AVPictureInPictureControllerDelegate {
                 DisplayTimeTracker.shared.startTracking(providerType: providerType)
             }
 
-            print("[PiPManager] PiP did start successfully!")
+            print("[PiPManager] VoIP PiP did start successfully!")
         }
     }
 
     nonisolated func pictureInPictureControllerWillStopPictureInPicture(_ pictureInPictureController: AVPictureInPictureController) {
         Task { @MainActor in
-            print("[PiPManager] PiP will stop")
+            print("[PiPManager] VoIP PiP will stop")
         }
     }
 
@@ -600,13 +595,13 @@ extension PiPManager: AVPictureInPictureControllerDelegate {
             // Stop tracking display time
             DisplayTimeTracker.shared.stopTracking()
 
-            print("[PiPManager] PiP did stop")
+            print("[PiPManager] VoIP PiP did stop")
         }
     }
 
     nonisolated func pictureInPictureController(_ pictureInPictureController: AVPictureInPictureController, failedToStartPictureInPictureWithError error: Error) {
         Task { @MainActor in
-            print("[PiPManager] ERROR: PiP failed to start: \(error)")
+            print("[PiPManager] ERROR: VoIP PiP failed to start: \(error)")
             self.isPiPActive = false
             self.isPreparingPiP = false
             self.errorMessage = "启动失败: \(error.localizedDescription)"
@@ -617,32 +612,5 @@ extension PiPManager: AVPictureInPictureControllerDelegate {
         Task { @MainActor in
             completionHandler(true)
         }
-    }
-}
-
-// MARK: - AVPictureInPictureSampleBufferPlaybackDelegate
-
-extension PiPManager: AVPictureInPictureSampleBufferPlaybackDelegate {
-    
-    nonisolated func pictureInPictureController(_ pictureInPictureController: AVPictureInPictureController, setPlaying playing: Bool) {
-        // 忽略播放/暂停请求，内容持续运行
-    }
-    
-    nonisolated func pictureInPictureControllerTimeRangeForPlayback(_ pictureInPictureController: AVPictureInPictureController) -> CMTimeRange {
-        // 返回一个有限的时间范围，避免显示"直播"标签
-        return CMTimeRange(start: .zero, duration: CMTime(value: Int64.max / 2, timescale: 1))
-    }
-    
-    nonisolated func pictureInPictureControllerIsPlaybackPaused(_ pictureInPictureController: AVPictureInPictureController) -> Bool {
-        // 始终返回 false（播放中），不显示暂停状态
-        return false
-    }
-    
-    nonisolated func pictureInPictureController(_ pictureInPictureController: AVPictureInPictureController, didTransitionToRenderSize newRenderSize: CMVideoDimensions) {
-        // 渲染尺寸变化，可忽略
-    }
-    
-    nonisolated func pictureInPictureController(_ pictureInPictureController: AVPictureInPictureController, skipByInterval skipInterval: CMTime) async {
-        // 不支持跳过
     }
 }
