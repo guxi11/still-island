@@ -28,6 +28,12 @@ final class PiPContentViewController: AVPictureInPictureVideoCallViewController 
         sampleBufferView?.removeFromSuperview()
         
         sampleBufferView = view
+        
+        // 关键：在添加约束前先设置初始 frame 为 preferredContentSize
+        // 这样可以避免 layer 从小尺寸开始导致的缩放动画
+        view.frame = CGRect(origin: .zero, size: preferredContentSize)
+        view.layoutIfNeeded()
+        
         view.translatesAutoresizingMaskIntoConstraints = false
         self.view.addSubview(view)
         
@@ -37,6 +43,9 @@ final class PiPContentViewController: AVPictureInPictureVideoCallViewController 
             view.trailingAnchor.constraint(equalTo: self.view.trailingAnchor),
             view.bottomAnchor.constraint(equalTo: self.view.bottomAnchor)
         ])
+        
+        // 立即布局，确保约束生效后尺寸正确
+        self.view.layoutIfNeeded()
     }
     
     override var preferredContentSize: CGSize {

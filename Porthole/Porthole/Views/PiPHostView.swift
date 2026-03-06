@@ -65,19 +65,38 @@ class SampleBufferDisplayView: UIView {
         backgroundColor = .black
         clipsToBounds = true
         
+        // 添加圆角
+        layer.cornerRadius = 12
+        layer.masksToBounds = true
+        
         // Configure the layer
         let sbLayer = sampleBufferDisplayLayer
         sbLayer.backgroundColor = UIColor.black.cgColor
-        sbLayer.videoGravity = .resizeAspect
+        // 使用 .resize 而不是 .resizeAspect，避免内容根据 layer bounds 变化而产生缩放动画
+        // 因为我们的帧尺寸 (400x200) 和 preferredContentSize (400x200) 是一致的
+        sbLayer.videoGravity = .resize
+        sbLayer.cornerRadius = 12
         
         print("[SampleBufferDisplayView] Created with layerClass override")
         print("[SampleBufferDisplayView] layer: \(sbLayer)")
     }
     
     override func layoutSubviews() {
+        // 禁用 bounds 变化时的隐式动画
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
         super.layoutSubviews()
-        if bounds.width > 0 && bounds.height > 0 {
-            print("[SampleBufferDisplayView] Layout with bounds: \(bounds)")
-        }
+        CATransaction.commit()
+        print("[SampleBufferDisplayView] layoutSubviews - bounds: \(bounds), layer.bounds: \(layer.bounds)")
+    }
+    
+    override func didMoveToSuperview() {
+        super.didMoveToSuperview()
+        print("[SampleBufferDisplayView] didMoveToSuperview - superview: \(String(describing: superview)), bounds: \(bounds)")
+    }
+    
+    override func didMoveToWindow() {
+        super.didMoveToWindow()
+        print("[SampleBufferDisplayView] didMoveToWindow - window: \(String(describing: window)), bounds: \(bounds)")
     }
 }

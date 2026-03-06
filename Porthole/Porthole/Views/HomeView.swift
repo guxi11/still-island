@@ -77,15 +77,18 @@ struct HomeView: View {
             let cardWidth: CGFloat = 260
             let cardHeight: CGFloat = 150
             let cardSpacing: CGFloat = 28
-            let miniScale: CGFloat = 0.25
+            // miniScale 使卡片缩放后与 PiP 窗口尺寸一致 (211.33 * 0.95 / 260 ≈ 0.77)
+            let miniScale: CGFloat = 0.77
             
             // 中心位置
             let centerX = screenSize.width / 2
             let centerY = screenSize.height / 2 - 20
             
-            // 左上角位置（缩小后的卡片中心点）- 更靠近角落
-            let cornerX: CGFloat = 30 + (cardWidth * miniScale) / 2
-            let cornerY: CGFloat = 16 + (cardHeight * miniScale) / 2
+            // 左上角位置 - 使用 PiP 窗口的实际尺寸
+            let pipWidth: CGFloat = 211.33 * 0.95
+            let pipHeight: CGFloat = 105.67 * 0.95
+            let cornerX: CGFloat = 15 + pipWidth / 2
+            let cornerY: CGFloat = 6 + pipHeight / 2
             
             // 是否在角落（只有在非上滑手势过程中才生效）
             let inCorner = (pipManager.isPiPActive || pipManager.isPreparingPiP) && cardSwipeState != .swipingUp
@@ -170,10 +173,21 @@ struct HomeView: View {
                         let targetOpacity: Double = {
                             if inCorner {
                                 if !isCurrent { return 0 }
+                                // PiP 激活后完全隐藏卡片，由 PiP 窗口接管显示
                                 if pipManager.isPiPActive && !pipManager.isPreparingPiP && dragOffset.height == 0 {
-                                    return 0.15
+                                    return 0
                                 }
-                                return 1.0
+                                // 从角落下滑恢复时逐渐显示
+                                if dragOffset.height > 0 {
+                                    let progress = min(dragOffset.height / 200, 1.0)
+                                    return Double(progress)
+                                }
+                                return 0
+                            }
+                            // 上滑飞行过程中透明度逐渐降低
+                            if isCurrent && dragOffset.height < 0 {
+                                let progress = min(abs(dragOffset.height) / 150, 1.0)
+                                return 1.0 - progress
                             }
                             if abs(index - safeCardIndex) > 2 { return 0 }
                             return isCurrent ? 1.0 : 0.55
@@ -197,16 +211,24 @@ struct HomeView: View {
                     }
                 }
                 
-                // PiP host view - 放在卡片飞行终点位置
+                // PiP host view - 使用 PiP 窗口的实际尺寸，避免 layer bounds 变化导致的缩放动画
                 if (pipManager.isPreparingPiP || pipManager.isPiPActive), let layer = pipManager.displayLayer {
+                    // 等比例缩小到 95%
+                    let pipViewWidth: CGFloat = 211.33 * 0.95
+                    let pipViewHeight: CGFloat = 105.67 * 0.95
+                    // 左边距 15，上边距 6
+                    let pipX = 15 + pipViewWidth / 2
+                    let pipY = 6 + pipViewHeight / 2
+                    
                     PiPHostView(
                         displayLayer: layer,
                         onViewCreated: { view in
                             pipManager.bindToViewLayer(view)
                         }
                     )
-                    .frame(width: cardWidth * miniScale, height: cardHeight * miniScale)
-                    .position(x: cornerX, y: cornerY)
+                    .frame(width: pipViewWidth, height: pipViewHeight)
+                    .clipShape(RoundedRectangle(cornerRadius: 11))
+                    .position(x: pipX, y: pipY)
                     .opacity(0.01)
                 }
                 
